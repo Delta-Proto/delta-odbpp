@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="378.71" height="303.12" viewBox="-0.0039 -0.0039 3.9449 3.1575" stroke-linecap="round" stroke-linejoin="round" stroke-width="0" fill-rule="nonzero" data-layers="true">
+  <style>
+    .layer { transition: opacity 0.3s; }
+    .layer.hidden { opacity: 0; pointer-events: none; }
+    .profile path { stroke: var(--viewer-inverse-bg, #FFFFFF); }
+    .layer-top { fill: #CC0000; stroke: #CC0000; }
+  </style>
+  <g transform="scale(1,-1) translate(0,-3.1496)">
+    <g id="layer-profile" class="layer profile" data-layer-name="profile" data-layer-type="PROFILE">
+      <path d="M 0.0000 0.0000 L 3.9370 0.0000 L 3.9370 3.1496 L 0.0000 3.1496 L 0.0000 0.0000 Z" fill="none" stroke="#FFFFFF" stroke-width="2px" vector-effect="non-scaling-stroke" class="profile"/>
+    </g>
+    <g id="layer-top" class="layer layer-top" data-layer-name="top" data-layer-type="SIGNAL">
+      <circle cx="0.393701" cy="0.393701" r="0.019685" fill="#CC0000"/>
+      <circle cx="0.787402" cy="0.393701" r="0.03937" fill="#CC0000"/>
+      <circle cx="1.181102" cy="0.393701" r="0.098425" fill="#CC0000"/>
+      <path d="M 0.3937 0.7874 L 1.1811 0.7874" stroke="#CC0000" stroke-width="0.0394" stroke-linecap="round" fill="none"/>
+      <path d="M 0.3937 1.1811 L 1.1811 1.1811" stroke="#CC0000" stroke-width="0.0787" stroke-linecap="round" fill="none"/>
+      <path d="M 0.3937 1.5748 L 1.1811 1.9685" stroke="#CC0000" stroke-width="0.0394" stroke-linecap="round" fill="none"/>
+      <path d="M 1.9685 1.5748 A 0.3937 0.3937 0 0 1 2.3622 1.9685" stroke="#CC0000" stroke-width="0.0394" fill="none" stroke-linecap="round"/>
+      <circle cx="1.968504" cy="0.393701" r="0.019685" fill="#CC0000"/>
+      <circle cx="2.362205" cy="0.393701" r="0.019685" fill="#CC0000"/>
+      <circle cx="2.755906" cy="0.393701" r="0.019685" fill="#CC0000"/>
+      <circle cx="3.149606" cy="0.393701" r="0.019685" fill="#CC0000"/>
+      <circle cx="3.543307" cy="0.393701" r="0.019685" fill="#CC0000"/>
+      <circle cx="1.968504" cy="0.787402" r="0.019685" fill="#CC0000"/>
+      <circle cx="2.362205" cy="0.787402" r="0.019685" fill="#CC0000"/>
+      <circle cx="2.755906" cy="0.787402" r="0.019685" fill="#CC0000"/>
+      <circle cx="3.149606" cy="0.787402" r="0.019685" fill="#CC0000"/>
+      <circle cx="3.543307" cy="0.787402" r="0.019685" fill="#CC0000"/>
+    </g>
+  </g>
+</svg>

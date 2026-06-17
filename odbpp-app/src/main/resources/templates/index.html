@@ -1,0 +1,1278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ODB++ Viewer — DeltaProto</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        /* ===== DeltaProto Design Tokens ===== */
+        :root {
+            --bg: #f2f2f2;
+            --bg-card: #ffffff;
+            --bg-input: #ffffff;
+            --bg-viewer: #e8e8e8;
+            --fg: #262626;
+            --fg-muted: #595959;
+            --fg-faint: #999;
+            --border: #bfbfbf;
+            --border-subtle: #d9d9d9;
+            --primary: #2e84cc;
+            --primary-hover: #2574b8;
+            --primary-fg: #ffffff;
+            --accent-red: #d82a30;
+            --ring: #2e84cc;
+            --item-bg: #f5f5f5;
+            --item-hover: #ebebeb;
+            --tab-active-bg: #ffffff;
+            --tooltip-bg: #ffffff;
+            --tooltip-border: #d9d9d9;
+            --tooltip-shadow: rgba(0,0,0,0.1);
+            --drag-tint: rgba(46,132,204,0.08);
+            --loading-bg: rgba(255,255,255,0.95);
+            --grid-line: rgba(0,0,0,0.04);
+            --checkbox-accent: #2e84cc;
+            --progress-from: #2e84cc;
+            --progress-to: #5ba3dd;
+            --spinner-track: #d9d9d9;
+        }
+        .dark {
+            --bg: #1a1a1a;
+            --bg-card: #1f1f1f;
+            --bg-input: #2a2a2a;
+            --bg-viewer: #141414;
+            --fg: #d9d9d9;
+            --fg-muted: #8c8c8c;
+            --fg-faint: #666;
+            --border: #404040;
+            --border-subtle: #333;
+            --primary: #2e84cc;
+            --primary-hover: #3a93dd;
+            --primary-fg: #ffffff;
+            --accent-red: #d82a30;
+            --ring: #2e84cc;
+            --item-bg: #262626;
+            --item-hover: #333;
+            --tab-active-bg: #141414;
+            --tooltip-bg: #1f1f1f;
+            --tooltip-border: #404040;
+            --tooltip-shadow: rgba(0,0,0,0.5);
+            --drag-tint: rgba(46,132,204,0.1);
+            --loading-bg: rgba(31,31,31,0.95);
+            --grid-line: rgba(255,255,255,0.03);
+            --checkbox-accent: #2e84cc;
+            --progress-from: #2e84cc;
+            --progress-to: #5ba3dd;
+            --spinner-track: #404040;
+        }
+
+        /* ===== Base ===== */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg); color: var(--fg); height: 100vh;
+            display: flex; flex-direction: column; transition: background 0.2s, color 0.2s;
+        }
+
+        /* ===== Scrollbar ===== */
+        * { scrollbar-color: var(--border) transparent; scrollbar-width: thin; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--fg-muted); }
+
+        /* ===== Header ===== */
+        header {
+            background: var(--bg-card); padding: 10px 20px; display: flex;
+            align-items: center; gap: 16px; border-bottom: 1px solid var(--border);
+            height: 56px;
+        }
+        .header-brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+        .header-brand svg { height: 32px; width: 32px; flex-shrink: 0; }
+        header h1 { font-size: 1.125rem; font-weight: 600; color: var(--fg); }
+        header h1 span { color: var(--fg-muted); font-weight: 400; }
+        .upload-btn {
+            background: var(--primary); color: var(--primary-fg); border: none; padding: 7px 16px;
+            border-radius: 8px; cursor: pointer; font-size: 0.875rem; font-weight: 500;
+            transition: background 0.15s; font-family: inherit;
+        }
+        .upload-btn:hover { background: var(--primary-hover); }
+        #file-input { display: none; }
+        .header-checkbox {
+            display: flex; align-items: center; gap: 6px; font-size: 0.8125rem;
+            cursor: pointer; color: var(--fg-muted);
+        }
+        .header-checkbox input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--checkbox-accent); }
+        .theme-toggle {
+            background: none; border: 1px solid var(--border); width: 36px; height: 36px;
+            border-radius: 8px; cursor: pointer; display: flex; align-items: center;
+            justify-content: center; color: var(--fg-muted); transition: background 0.15s, color 0.15s;
+        }
+        .theme-toggle:hover { background: var(--item-hover); color: var(--fg); }
+        .zoom-controls { display: flex; gap: 6px; margin-left: auto; align-items: center; }
+        .zoom-btn {
+            background: var(--bg-input); color: var(--fg); border: 1px solid var(--border);
+            width: 36px; height: 36px; border-radius: 8px; cursor: pointer; font-size: 1.1rem;
+            display: flex; align-items: center; justify-content: center;
+            transition: background 0.15s; font-family: inherit;
+        }
+        .zoom-btn:hover { background: var(--item-hover); }
+        .zoom-level {
+            background: var(--bg-input); border: 1px solid var(--border); padding: 6px 10px;
+            border-radius: 8px; font-size: 0.8rem; min-width: 56px; text-align: center;
+            color: var(--fg-muted);
+        }
+
+        /* ===== Layout ===== */
+        .main-container { display: flex; flex: 1; overflow: hidden; }
+        .sidebar {
+            width: 280px; background: var(--bg-card); border-right: 1px solid var(--border);
+            padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px;
+        }
+        .sidebar h2 {
+            font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;
+            color: var(--fg-muted); margin-bottom: 4px; font-weight: 600;
+        }
+
+        /* ===== View Tabs ===== */
+        .view-tabs {
+            display: flex; gap: 2px; padding: 8px 16px; background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+        }
+        .view-tab {
+            background: transparent; color: var(--fg-muted); border: none; padding: 8px 16px;
+            border-radius: 8px 8px 0 0; cursor: pointer; font-size: 0.8125rem;
+            transition: background 0.15s, color 0.15s; font-family: inherit; font-weight: 500;
+        }
+        .view-tab:hover { background: var(--item-hover); color: var(--fg); }
+        .view-tab.active { background: var(--tab-active-bg); color: var(--primary); font-weight: 600; }
+        .view-tab:disabled { cursor: not-allowed; opacity: 0.4; }
+
+        /* ===== Layer Controls ===== */
+        .side-btn {
+            background: var(--bg-input); color: var(--fg-muted); border: 1px solid var(--border);
+            padding: 2px 8px; border-radius: 6px; cursor: pointer; font-size: 0.6875rem;
+            transition: background 0.15s, color 0.15s; font-family: inherit; font-weight: 500;
+        }
+        .side-btn:hover { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
+        .layer-list { display: flex; flex-direction: column; gap: 3px; }
+        .layer-item {
+            display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+            background: var(--item-bg); border-radius: 8px; cursor: pointer;
+            transition: background 0.15s; border: 1px solid transparent;
+        }
+        .layer-item:hover { background: var(--item-hover); border-color: var(--border-subtle); }
+        .layer-item input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--checkbox-accent); }
+        .layer-item .color-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 1px rgba(0,0,0,0.1); }
+        .layer-item .name {
+            flex: 1; font-size: 0.8125rem; white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis;
+        }
+        .layer-item .layer-type-badge {
+            font-size: 0.6875rem; padding: 2px 6px; border-radius: 4px;
+            background: var(--bg-input); color: var(--fg-muted); border: 1px solid var(--border-subtle);
+            white-space: nowrap;
+        }
+        .layer-item .name[title] { position: relative; }
+        .layer-item .name:hover::after {
+            content: attr(title); position: absolute; left: 0; top: 100%;
+            background: var(--tooltip-bg); color: var(--fg); padding: 4px 8px; border-radius: 6px;
+            font-size: 0.75rem; white-space: nowrap; z-index: 100;
+            border: 1px solid var(--tooltip-border); box-shadow: 0 4px 12px var(--tooltip-shadow);
+            pointer-events: none;
+        }
+
+        /* ===== Viewer ===== */
+        .viewer-container {
+            flex: 1; position: relative; overflow: hidden; background: var(--bg-viewer);
+            background-image:
+                linear-gradient(var(--grid-line) 1px, transparent 1px),
+                linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+        #svg-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: grab; }
+        #svg-container:active { cursor: grabbing; }
+        #svg-content { transform-origin: 0 0; }
+        #data-panel {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            overflow: auto; background: var(--bg);
+        }
+        #data-panel.hidden { display: none; }
+        .drop-zone {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            text-align: center; color: var(--fg-faint);
+        }
+        .drop-zone svg { width: 80px; height: 80px; margin-bottom: 16px; opacity: 0.4; }
+        .drop-zone p { font-size: 1.1rem; margin-bottom: 8px; }
+        .drop-zone small { font-size: 0.85rem; color: var(--fg-faint); }
+        .drop-zone .try-example {
+            margin-top: 18px; display: inline-block; padding: 8px 16px;
+            border: 1px solid var(--border); border-radius: 6px; background: transparent;
+            color: var(--fg); cursor: pointer; font-size: 0.9rem;
+        }
+        .drop-zone .try-example:hover { background: var(--item-hover); border-color: var(--primary); color: var(--primary); }
+        .drag-over { background: var(--drag-tint) !important; }
+        .loading {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            text-align: center; background: var(--loading-bg); padding: 32px 48px;
+            border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.15); border: 1px solid var(--border);
+        }
+        .spinner {
+            width: 48px; height: 48px; border: 3px solid var(--spinner-track);
+            border-top-color: var(--primary); border-radius: 50%;
+            animation: spin 1s linear infinite; margin: 0 auto;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-text { margin-top: 16px; font-size: 1rem; color: var(--fg); }
+        .loading-status { margin-top: 8px; font-size: 0.8125rem; color: var(--fg-muted); min-height: 20px; }
+        .progress-bar { width: 200px; height: 4px; background: var(--spinner-track); border-radius: 2px; margin: 16px auto 0; overflow: hidden; }
+        .progress-bar-fill { height: 100%; background: linear-gradient(90deg, var(--progress-from), var(--progress-to)); border-radius: 2px; transition: width 0.3s ease; width: 0%; }
+        .progress-bar-indeterminate .progress-bar-fill { width: 30%; animation: indeterminate 1.5s ease-in-out infinite; }
+        @keyframes indeterminate { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }
+        .hidden { display: none !important; }
+        .no-layers { color: var(--fg-faint); font-size: 0.8125rem; padding: 20px; text-align: center; }
+        .file-info {
+            background: var(--item-bg); padding: 10px 12px; border-radius: 8px;
+            font-size: 0.8125rem; color: var(--fg-muted); border: 1px solid var(--border-subtle);
+        }
+
+        /* ===== Recent Projects ===== */
+        .recent-projects { display: flex; flex-direction: column; gap: 4px; }
+        .recent-item {
+            display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+            background: var(--item-bg); border-radius: 8px; cursor: pointer;
+            transition: background 0.15s; border: 1px solid transparent;
+        }
+        .recent-item:hover { background: var(--item-hover); border-color: var(--border-subtle); }
+        .recent-item .recent-icon {
+            width: 28px; height: 28px; border-radius: 6px; background: var(--primary);
+            color: var(--primary-fg); display: flex; align-items: center; justify-content: center;
+            font-size: 0.6875rem; font-weight: 600; flex-shrink: 0;
+        }
+        .recent-item .recent-info { flex: 1; min-width: 0; }
+        .recent-item .recent-name {
+            font-size: 0.8125rem; white-space: nowrap; overflow: hidden;
+            text-overflow: ellipsis; color: var(--fg);
+        }
+        .recent-item .recent-date { font-size: 0.6875rem; color: var(--fg-faint); }
+        .recent-item .recent-delete {
+            background: none; border: none; color: var(--fg-faint); cursor: pointer;
+            padding: 2px 4px; border-radius: 4px; font-size: 0.875rem; line-height: 1;
+            opacity: 0; transition: opacity 0.15s, color 0.15s;
+        }
+        .recent-item:hover .recent-delete { opacity: 1; }
+        .recent-item .recent-delete:hover { color: var(--accent-red); }
+
+        /* ===== BOM table ===== */
+        .bom-toolbar {
+            position: sticky; top: 0; z-index: 2;
+            display: flex; gap: 12px; align-items: center;
+            padding: 10px 16px; background: var(--bg);
+            border-bottom: 1px solid var(--border); flex-wrap: wrap;
+        }
+        .bom-summary { color: var(--fg-faint); font-size: 0.85rem; }
+        .bom-search {
+            flex: 1; min-width: 200px; padding: 6px 10px;
+            background: var(--item-hover); color: var(--fg);
+            border: 1px solid var(--border); border-radius: 4px;
+            font: inherit; font-size: 0.875rem;
+        }
+        .bom-search:focus { outline: 1px solid var(--primary); border-color: var(--primary); }
+        .bom-export {
+            padding: 6px 12px; background: transparent; color: var(--fg);
+            border: 1px solid var(--border); border-radius: 4px; cursor: pointer;
+            font-size: 0.825rem;
+        }
+        .bom-export:hover { background: var(--item-hover); border-color: var(--primary); color: var(--primary); }
+        .bom-table-wrap { overflow: auto; padding: 0 0 16px; }
+        .bom-table {
+            width: 100%; border-collapse: collapse; font-size: 0.825rem;
+            font-variant-numeric: tabular-nums;
+        }
+        .bom-table th, .bom-table td {
+            padding: 6px 10px; text-align: left;
+            border-bottom: 1px solid var(--border); vertical-align: top;
+        }
+        .bom-table thead th {
+            position: sticky; top: 50px; z-index: 1;
+            background: var(--bg); cursor: pointer; user-select: none;
+            font-weight: 600; color: var(--fg);
+        }
+        .bom-table thead th:hover { color: var(--primary); }
+        .bom-table tbody tr:hover { background: var(--item-hover); }
+        .bom-table .num { text-align: right; font-feature-settings: "tnum"; white-space: nowrap; color: var(--fg-faint); }
+        .bom-table .description {
+            max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            color: var(--fg-faint);
+        }
+        .bom-table tr.orphan td { opacity: 0.7; font-style: italic; }
+        .refdes-cell { line-height: 1.6; }
+        .refdes-pill {
+            display: inline-block; padding: 1px 8px; margin: 1px 3px 1px 0;
+            border-radius: 10px; font-size: 0.75rem; font-weight: 500;
+            background: var(--item-hover); color: var(--fg);
+            border: 1px solid var(--border); cursor: help;
+            transition: transform 0.08s, box-shadow 0.08s;
+        }
+        .refdes-pill:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,0.25); }
+        .refdes-pill.side-top    { background: rgba(106,174,214,0.18); border-color: #6aaed6; color: #6aaed6; }
+        .refdes-pill.side-bottom { background: rgba(232,150,84,0.18);  border-color: #e89654; color: #e89654; }
+    </style>
+</head>
+<body class="dark">
+    <header>
+        <a class="header-brand" href="https://deltaproto.com/opensource-odbpp-viewer" target="_blank" title="DeltaProto">
+            <svg viewBox="0 0 1112 1112" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <rect x="97.836" y="0.93" width="915.819" height="1110.141" fill="#d82a30" rx="81.819" ry="81.819"/>
+                <rect x="424.184" y="106.923" width="138.535" height="506.722" fill="#fff"/>
+                <rect x="549.238" y="496.96" width="138.535" height="506.722" fill="#fff"/>
+                <ellipse cx="283.789" cy="555.93" rx="280.325" ry="277.536" fill="#fff"/>
+                <ellipse cx="827.238" cy="556.465" rx="280.325" ry="277.536" fill="#fff"/>
+                <path d="M 814 418 C 752.2 424.2 702.5 469.4 690.3 530.7 C 687.9 542.8 687.9 569.1 690.3 581.3 C 701.8 638.9 744.5 681.2 802.5 692.6 C 814.5 695 838.2 695 850.6 692.7 C 879.5 687.4 903 675 924.1 654 C 951.5 626.6 965 594.4 965 556 C 965 527.6 957.2 502 941.2 478.1 C 934.2 467.6 916.3 449.4 905.8 442.2 C 879.3 424.1 844.8 415 814 418 Z" fill="#d82a30"/>
+                <path d="M 272.2 418.1 C 227.7 422.4 188.3 447.7 164.9 487 C 155.6 502.7 149 523.7 147 544.2 C 143.1 583.8 158.1 624.8 187 653.8 C 206.6 673.4 230.4 686.2 258.3 692.2 C 272.8 695.2 297.2 695.2 311.7 692.2 C 361.9 681.5 400.6 647.3 416.5 599.7 C 421.5 584.7 423.4 572.9 423.4 556 C 423.4 519.2 410.6 487.3 385.2 460.9 C 360.9 435.5 331.6 421.3 297 418.1 C 284.4 416.9 284.3 416.9 272.2 418.1 Z" fill="#d82a30"/>
+            </svg>
+            <h1>ODB++ Viewer</h1>
+        </a>
+        <label class="upload-btn">
+            <input type="file" id="file-input" accept=".zip,.tgz,.tar.gz">
+            Open File
+        </label>
+        <div class="zoom-controls">
+            <button class="zoom-btn" id="zoom-out" title="Zoom Out">-</button>
+            <span class="zoom-level" id="zoom-level">100%</span>
+            <button class="zoom-btn" id="zoom-in" title="Zoom In">+</button>
+            <button class="zoom-btn" id="zoom-fit" title="Fit to View">&#8644;</button>
+        </div>
+        <button class="theme-toggle" id="theme-toggle" title="Toggle light/dark mode" onclick="toggleTheme()">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="4" id="theme-icon-sun-parts"/>
+                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" id="theme-icon-rays"/>
+            </svg>
+        </button>
+    </header>
+
+    <div class="main-container">
+        <aside class="sidebar">
+            <div id="file-info-container"></div>
+
+            <div>
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                    <input type="checkbox" id="select-all-layers" onclick="toggleAllLayers()"
+                        style="width:16px; height:16px; accent-color:var(--checkbox-accent);">
+                    <h2 style="margin-bottom:0;">Layers</h2>
+                    <div style="display:flex; gap:4px; margin-left:auto;">
+                        <button class="side-btn" onclick="selectSide('TOP')" title="Show top layers only">Top</button>
+                        <button class="side-btn" onclick="selectSide('BOTTOM')" title="Show bottom layers only">Bot</button>
+                    </div>
+                </div>
+                <div class="layer-list" id="layer-list">
+                    <div class="no-layers">No layers loaded</div>
+                </div>
+            </div>
+
+            <div id="recent-section">
+                <h2>Recent Projects</h2>
+                <div class="recent-projects" id="recent-list">
+                    <div class="no-layers">No recent projects</div>
+                </div>
+            </div>
+        </aside>
+
+        <div style="flex:1; display:flex; flex-direction:column; overflow:hidden;">
+            <div class="view-tabs" id="view-tabs" style="display:none;">
+                <button class="view-tab active" data-view="layers" onclick="switchView('layers')">All Layers</button>
+                <button class="view-tab" data-view="top" onclick="switchView('top')">Board Top</button>
+                <button class="view-tab" data-view="bottom" onclick="switchView('bottom')">Board Bottom</button>
+                <button class="view-tab" data-view="comp-top" onclick="switchView('comp-top')">Components Top</button>
+                <button class="view-tab" data-view="comp-bottom" onclick="switchView('comp-bottom')">Components Bottom</button>
+                <button class="view-tab" data-view="stackup" onclick="switchView('stackup')">Stackup</button>
+                <button class="view-tab" data-view="bom" onclick="switchView('bom')">BOM</button>
+                <span style="flex:1"></span>
+                <button class="view-tab download-btn" id="download-top-png" title="Download realistic top as PNG"
+                        onclick="downloadThumbnail('top')" disabled>PNG Top</button>
+                <button class="view-tab download-btn" id="download-bottom-png" title="Download realistic bottom as PNG"
+                        onclick="downloadThumbnail('bottom')" disabled>PNG Bottom</button>
+            </div>
+            <div class="viewer-container" id="viewer-container">
+                <div class="drop-zone" id="drop-zone">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/>
+                    </svg>
+                    <p>Drop an ODB++ file here</p>
+                    <small>or click "Open File" above (.zip, .tgz, .tar.gz)</small>
+                    <div><button class="try-example" onclick="loadExampleArchive()">Try Example</button></div>
+                </div>
+                <div class="loading hidden" id="loading">
+                    <div class="spinner"></div>
+                    <div class="loading-text">Processing ODB++ file</div>
+                    <div class="loading-status" id="loading-status">Uploading...</div>
+                    <div class="progress-bar progress-bar-indeterminate">
+                        <div class="progress-bar-fill" id="progress-fill"></div>
+                    </div>
+                </div>
+                <div id="svg-container">
+                    <div id="svg-content"></div>
+                </div>
+                <div id="data-panel" class="hidden"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ===== Configuration =====
+        const API_BASE = window.ODBPP_API_BASE || '';
+        const DB_NAME = 'odbpp-viewer';
+        const DB_VERSION = 1;
+        const STORE_NAME = 'projects';
+        const MAX_RECENT = 5;
+        // The model is mm-normalised at parse time, so SVG viewBoxes are always in mm.
+        // Use the CSS reference of 3.7795 px/mm (96 dpi).
+        const PX_PER_MM = 3.7795;
+
+        // ===== State =====
+        let layers = [];
+        let currentFile = null;
+        let combinedSvg = '';
+        let realisticTopSvg = null;
+        let realisticBottomSvg = null;
+        let componentsTopSvg = null;
+        let componentsBottomSvg = null;
+        let stackupData = null;
+        let stackupTotalMm = 0;
+        let billData = null;
+        let bomSortKey = 'item';
+        let bomSortDir = 1;
+        let bomFilter = '';
+        let currentView = 'layers';
+        let scale = 1, panX = 0, panY = 0, isPanning = false, startX, startY;
+        let db = null;
+
+        // Layer type colors (matching ODB++ matrix types)
+        const LAYER_TYPE_COLORS = {
+            'SIGNAL': '#CC0000', 'POWER_GROUND': '#0000CC', 'MIXED': '#6600CC',
+            'SOLDER_MASK': '#00CC00', 'SILK_SCREEN': '#FFFF00', 'SOLDER_PASTE': '#FF6600',
+            'DRILL': '#FF00FF', 'ROUT': '#00FFFF', 'DOCUMENT': '#888888',
+            'COMPONENT': '#FF8800', 'DIELECTRIC': '#996633', 'PROFILE': '#FF5522'
+        };
+
+        const LAYER_TYPE_LABELS = {
+            'SIGNAL': 'Signal', 'POWER_GROUND': 'Power', 'MIXED': 'Mixed',
+            'SOLDER_MASK': 'Mask', 'SILK_SCREEN': 'Silk', 'SOLDER_PASTE': 'Paste',
+            'DRILL': 'Drill', 'ROUT': 'Rout', 'DOCUMENT': 'Doc',
+            'COMPONENT': 'Comp', 'DIELECTRIC': 'Diel', 'PROFILE': 'Profile'
+        };
+
+        const TOP_TYPES_CONTEXTS = ['TOP'];
+        const BOTTOM_TYPES_CONTEXTS = ['BOTTOM'];
+
+        // DOM refs
+        const fileInput = document.getElementById('file-input');
+        const layerList = document.getElementById('layer-list');
+        const svgContainer = document.getElementById('svg-container');
+        const svgContent = document.getElementById('svg-content');
+        const dataPanel = document.getElementById('data-panel');
+        const viewerContainer = document.getElementById('viewer-container');
+        const dropZone = document.getElementById('drop-zone');
+        const loading = document.getElementById('loading');
+        const zoomLevel = document.getElementById('zoom-level');
+
+        // ===== IndexedDB =====
+        function openDb() {
+            return new Promise((resolve, reject) => {
+                const req = indexedDB.open(DB_NAME, DB_VERSION);
+                req.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains(STORE_NAME)) {
+                        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+                    }
+                };
+                req.onsuccess = (e) => resolve(e.target.result);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        async function initDb() {
+            try { db = await openDb(); } catch (e) { console.warn('IndexedDB unavailable:', e); }
+        }
+
+        function tx_complete(tx) {
+            return new Promise((resolve, reject) => {
+                tx.oncomplete = resolve;
+                tx.onerror = () => reject(tx.error);
+            });
+        }
+
+        async function storeProjectSafe(name, blob) {
+            if (!db) return;
+            try {
+                const tx = db.transaction(STORE_NAME, 'readwrite');
+                const store = tx.objectStore(STORE_NAME);
+                store.put({ id: name, name, blob, date: Date.now(), size: blob.size });
+                await tx_complete(tx);
+                await pruneRecent();
+            } catch (e) { console.warn('Failed to store project:', e); }
+        }
+
+        async function getRecentProjects() {
+            if (!db) return [];
+            return new Promise((resolve) => {
+                const tx = db.transaction(STORE_NAME, 'readonly');
+                const store = tx.objectStore(STORE_NAME);
+                const req = store.getAll();
+                req.onsuccess = () => {
+                    const all = req.result || [];
+                    all.sort((a, b) => b.date - a.date);
+                    resolve(all.slice(0, MAX_RECENT));
+                };
+                req.onerror = () => resolve([]);
+            });
+        }
+
+        async function getProjectBlob(id) {
+            if (!db) return null;
+            return new Promise((resolve) => {
+                const tx = db.transaction(STORE_NAME, 'readonly');
+                const store = tx.objectStore(STORE_NAME);
+                const req = store.get(id);
+                req.onsuccess = () => resolve(req.result ? req.result.blob : null);
+                req.onerror = () => resolve(null);
+            });
+        }
+
+        async function deleteProject(id) {
+            if (!db) return;
+            try {
+                const tx = db.transaction(STORE_NAME, 'readwrite');
+                tx.objectStore(STORE_NAME).delete(id);
+                await tx_complete(tx);
+                renderRecentProjects();
+            } catch (e) { console.warn('Failed to delete project:', e); }
+        }
+
+        async function pruneRecent() {
+            if (!db) return;
+            const all = await getRecentProjects();
+            // getRecentProjects returns sorted, capped to MAX_RECENT
+            // Get ALL to find ones beyond the limit
+            const tx = db.transaction(STORE_NAME, 'readonly');
+            const store = tx.objectStore(STORE_NAME);
+            const req = store.getAll();
+            req.onsuccess = async () => {
+                const records = req.result || [];
+                if (records.length <= MAX_RECENT) return;
+                records.sort((a, b) => b.date - a.date);
+                const toDelete = records.slice(MAX_RECENT);
+                const dtx = db.transaction(STORE_NAME, 'readwrite');
+                const dstore = dtx.objectStore(STORE_NAME);
+                for (const r of toDelete) dstore.delete(r.id);
+            };
+        }
+
+        async function renderRecentProjects() {
+            const list = document.getElementById('recent-list');
+            const projects = await getRecentProjects();
+            if (projects.length === 0) {
+                list.innerHTML = '<div class="no-layers">No recent projects</div>';
+                return;
+            }
+            list.innerHTML = projects.map(p => {
+                const date = new Date(p.date);
+                const dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+                    + ' ' + date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+                const sizeStr = p.size > 1048576
+                    ? (p.size / 1048576).toFixed(1) + ' MB'
+                    : (p.size / 1024).toFixed(0) + ' KB';
+                const ext = p.name.split('.').pop().toUpperCase();
+                return `<div class="recent-item" onclick="loadFromRecent('${escapeAttr(p.id)}')" title="${escapeAttr(p.name)}">
+                    <div class="recent-icon">${ext}</div>
+                    <div class="recent-info">
+                        <div class="recent-name">${escapeHtml(p.name)}</div>
+                        <div class="recent-date">${dateStr} &middot; ${sizeStr}</div>
+                    </div>
+                    <button class="recent-delete" onclick="event.stopPropagation(); deleteProject('${escapeAttr(p.id)}')" title="Remove from history">&times;</button>
+                </div>`;
+            }).join('');
+        }
+
+        function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+        function escapeAttr(s) { return s.replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
+
+        async function loadFromRecent(id) {
+            const blob = await getProjectBlob(id);
+            if (!blob) { alert('File no longer available in browser storage.'); return; }
+            const file = new File([blob], id, { type: blob.type || 'application/octet-stream' });
+            loadFile(file);
+        }
+
+        // ===== File input & drag-drop =====
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) loadFile(e.target.files[0]);
+        });
+        viewerContainer.addEventListener('dragover', (e) => {
+            e.preventDefault(); viewerContainer.classList.add('drag-over');
+        });
+        viewerContainer.addEventListener('dragleave', () => viewerContainer.classList.remove('drag-over'));
+        viewerContainer.addEventListener('drop', (e) => {
+            e.preventDefault(); viewerContainer.classList.remove('drag-over');
+            if (e.dataTransfer.files.length > 0) loadFile(e.dataTransfer.files[0]);
+        });
+
+        // ===== Main load flow =====
+        async function loadFile(file) {
+            const loadingStatus = document.getElementById('loading-status');
+            const progressBar = document.querySelector('.progress-bar');
+            dropZone.classList.add('hidden');
+            loading.classList.remove('hidden');
+            progressBar.classList.add('progress-bar-indeterminate');
+            currentFile = file;
+
+            try {
+                loadingStatus.textContent = 'Uploading ' + file.name + '...';
+
+                const formData = new FormData();
+                formData.append('file', file);
+
+                const resp = await fetch(API_BASE + '/api/odbpp/render', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!resp.ok) {
+                    const data = await resp.json().catch(() => ({}));
+                    throw new Error(data.error || 'Server error: ' + resp.status);
+                }
+
+                loadingStatus.textContent = 'Rendering...';
+                const data = await resp.json();
+                if (data.error) throw new Error(data.error);
+
+                // Store results
+                combinedSvg = data.svg;
+                realisticTopSvg = data.realisticTopSvg;
+                realisticBottomSvg = data.realisticBottomSvg;
+                componentsTopSvg = data.componentsTopSvg;
+                componentsBottomSvg = data.componentsBottomSvg;
+                stackupData = Array.isArray(data.stackup) ? data.stackup : [];
+                stackupTotalMm = Number(data.stackupTotalMm) || 0;
+                billData = Array.isArray(data.bill) ? data.bill : [];
+
+                // Build layer state from metadata
+                layers = (data.layers || []).map((meta, index) => ({
+                    name: meta.name,
+                    id: meta.id,
+                    type: meta.type || 'DOCUMENT',
+                    context: meta.context || '',
+                    color: LAYER_TYPE_COLORS[meta.type] || '#888888',
+                    visible: true,
+                    index
+                }));
+
+                // Show file info
+                showFileInfo(data.filename, data.stepCount);
+
+                // Show view tabs and configure realistic tab availability
+                document.getElementById('view-tabs').style.display = 'flex';
+                const topTab = document.querySelector('[data-view="top"]');
+                const botTab = document.querySelector('[data-view="bottom"]');
+                topTab.disabled = !realisticTopSvg;
+                topTab.style.opacity = realisticTopSvg ? 1 : 0.4;
+                botTab.disabled = !realisticBottomSvg;
+                botTab.style.opacity = realisticBottomSvg ? 1 : 0.4;
+                const compTopTab = document.querySelector('[data-view="comp-top"]');
+                const compBotTab = document.querySelector('[data-view="comp-bottom"]');
+                if (compTopTab) {
+                    compTopTab.disabled = !componentsTopSvg;
+                    compTopTab.style.opacity = componentsTopSvg ? 1 : 0.4;
+                }
+                if (compBotTab) {
+                    compBotTab.disabled = !componentsBottomSvg;
+                    compBotTab.style.opacity = componentsBottomSvg ? 1 : 0.4;
+                }
+                const stackupTab = document.querySelector('[data-view="stackup"]');
+                if (stackupTab) {
+                    const has = stackupData && stackupData.length > 0;
+                    stackupTab.disabled = !has;
+                    stackupTab.style.opacity = has ? 1 : 0.4;
+                }
+                const bomTab = document.querySelector('[data-view="bom"]');
+                if (bomTab) {
+                    const has = billData && billData.length > 0;
+                    bomTab.disabled = !has;
+                    bomTab.style.opacity = has ? 1 : 0.4;
+                }
+                const topDl = document.getElementById('download-top-png');
+                const botDl = document.getElementById('download-bottom-png');
+                if (topDl) topDl.disabled = !realisticTopSvg;
+                if (botDl) botDl.disabled = !realisticBottomSvg;
+
+                // Render
+                currentView = 'layers';
+                document.querySelectorAll('.view-tab').forEach(t =>
+                    t.classList.toggle('active', t.dataset.view === 'layers'));
+                renderSvg();
+                renderLayerList();
+                fitToView();
+
+                // Store in IndexedDB for recent history
+                await storeProjectSafe(file.name, file.slice());
+                renderRecentProjects();
+
+            } catch (error) {
+                alert('Error: ' + error.message);
+                dropZone.classList.remove('hidden');
+            } finally {
+                loading.classList.add('hidden');
+                progressBar.classList.remove('progress-bar-indeterminate');
+            }
+        }
+
+        // ===== Load bundled example =====
+        async function loadExampleArchive() {
+            try {
+                const resp = await fetch(API_BASE + '/api/odbpp/example.zip');
+                if (!resp.ok) throw new Error('Example archive not available (' + resp.status + ')');
+                const blob = await resp.blob();
+                const file = new File([blob], 'odbpp-sample.zip', { type: 'application/zip' });
+                await loadFile(file);
+            } catch (e) {
+                alert(e.message);
+            }
+        }
+
+        // ===== PNG thumbnail download =====
+        async function downloadThumbnail(side) {
+            if (!currentFile) return;
+            const btn = document.getElementById(
+                side === 'top' ? 'download-top-png' : 'download-bottom-png');
+            const oldLabel = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = 'Rendering…'; }
+            try {
+                const form = new FormData();
+                form.append('file', currentFile);
+                const url = API_BASE + '/api/odbpp/thumbnail?side=' + encodeURIComponent(side) + '&width=1600';
+                const resp = await fetch(url, { method: 'POST', body: form });
+                if (!resp.ok) {
+                    const text = await resp.text();
+                    throw new Error('Thumbnail failed: ' + text);
+                }
+                const blob = await resp.blob();
+                const base = (currentFile.name || 'pcb').replace(/\.(zip|tgz|tar\.gz)$/i, '');
+                const objUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = objUrl;
+                a.download = base + '-' + side + '.png';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(objUrl), 5000);
+            } catch (e) {
+                alert(e.message);
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = oldLabel; }
+            }
+        }
+
+        // ===== SVG rendering =====
+        function renderSvg() {
+            let svgStr = null, flipX = false;
+            if (currentView === 'layers') svgStr = combinedSvg;
+            else if (currentView === 'top') svgStr = realisticTopSvg;
+            else if (currentView === 'bottom') { svgStr = realisticBottomSvg; flipX = true; }
+            else if (currentView === 'comp-top') svgStr = componentsTopSvg;
+            else if (currentView === 'comp-bottom') { svgStr = componentsBottomSvg; flipX = true; }
+            else if (currentView === 'stackup') { renderStackup(); return; }
+            else if (currentView === 'bom') { renderBom(); return; }
+
+            // SVG views live in the pan/zoom container
+            svgContainer.classList.remove('hidden');
+            dataPanel.classList.add('hidden');
+
+            if (!svgStr) {
+                const msg = currentView.startsWith('comp-')
+                    ? 'No components on this side.<br><small>The EDA data may be missing or the archive has no placed components.</small>'
+                    : 'No realistic view available.<br><small>The board profile or layer types may not be recognized.</small>';
+                svgContent.innerHTML = '<div style="color:var(--fg-faint);text-align:center;padding:40px;">' + msg + '</div>';
+                return;
+            }
+
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(svgStr, 'image/svg+xml');
+            const svg = doc.querySelector('svg');
+            if (svg) {
+                const vb = svg.getAttribute('viewBox');
+                if (vb) {
+                    // Server emits mm-normalised viewBoxes. Render the SVG with explicit
+                    // mm widths so fitToView's px/mm math lines up with the page.
+                    const parts = vb.split(' ').map(Number);
+                    svg.setAttribute('width',  parts[2] + 'mm');
+                    svg.setAttribute('height', parts[3] + 'mm');
+                }
+                svg.style.overflow = 'visible';
+
+                // For bottom view, mirror the viewport horizontally
+                if (flipX && vb) {
+                    const [vx,,vw] = vb.split(' ').map(Number);
+                    const viewport = svg.querySelector('#viewport');
+                    if (viewport) {
+                        const t = viewport.getAttribute('transform') || '';
+                        viewport.setAttribute('transform',
+                            `translate(${vx + vw + vx}, 0) scale(-1, 1) ${t}`);
+                    }
+                }
+
+                svgContent.innerHTML = '';
+                svgContent.appendChild(svg);
+            }
+            updateTransform();
+        }
+
+        function switchView(view) {
+            if (view === 'top' && !realisticTopSvg) return;
+            if (view === 'bottom' && !realisticBottomSvg) return;
+            if (view === 'comp-top' && !componentsTopSvg) return;
+            if (view === 'comp-bottom' && !componentsBottomSvg) return;
+            if (view === 'stackup' && (!stackupData || stackupData.length === 0)) return;
+            if (view === 'bom' && (!billData || billData.length === 0)) return;
+            currentView = view;
+            document.querySelectorAll('.view-tab').forEach(t =>
+                t.classList.toggle('active', t.dataset.view === view));
+            renderSvg();
+            // Pan/zoom fit only applies to SVG views; stackup/bom render to a normal scrollable panel.
+            if (view !== 'stackup' && view !== 'bom') fitToView();
+        }
+
+        // ===== Stackup cross-section rendering =====
+        const STACKUP_COLORS = {
+            SIGNAL:         { fill: '#c98c3b', stroke: '#8a5b1d' },  // copper
+            POWER_GROUND:   { fill: '#b67a30', stroke: '#78501d' },  // copper (darker)
+            MIXED:          { fill: '#c98c3b', stroke: '#8a5b1d' },
+            DIELECTRIC:     { fill: '#d8c38a', stroke: '#8a7a4a' },  // tan (FR-4)
+            SOLDER_MASK:    { fill: '#1c7a3a', stroke: '#0a4020' },  // green
+            SILK_SCREEN:    { fill: '#f2f2f2', stroke: '#777' },     // off-white
+            SOLDER_PASTE:   { fill: '#9a9a9a', stroke: '#555' },     // gray
+            CONDUCTIVE_PASTE: { fill: '#b76a9c', stroke: '#6a3d59' },
+        };
+
+        function renderStackup() {
+            svgContainer.classList.add('hidden');
+            dataPanel.classList.remove('hidden');
+            if (!stackupData || stackupData.length === 0) {
+                dataPanel.innerHTML = '<div style="color:var(--fg-faint);padding:40px;text-align:center;">No stackup data available.</div>';
+                return;
+            }
+
+            // Layout constants (in logical SVG units)
+            const LEFT_LABEL_W = 220;
+            const RIGHT_LABEL_W = 260;
+            const BAR_W = 500;
+            const GAP = 2;
+            const MIN_BAR_H = 8;
+            const MAX_BAR_H = 80;
+
+            // Scale thicknesses nonlinearly so very thin layers remain visible without
+            // dwarfing everything else. sqrt compresses the top end.
+            const total = stackupData.reduce((s, e) => s + Math.max(1e-5, e.thicknessMm), 0);
+            const scaleFor = t => {
+                const fraction = Math.max(1e-5, t) / total;
+                return Math.min(MAX_BAR_H, Math.max(MIN_BAR_H, Math.sqrt(fraction) * 180));
+            };
+
+            const rows = stackupData.map(e => ({ ...e, h: scaleFor(e.thicknessMm) }));
+            const totalH = rows.reduce((s, r) => s + r.h + GAP, 0);
+            const VB_W = LEFT_LABEL_W + BAR_W + RIGHT_LABEL_W + 40;
+            const VB_H = totalH + 80;
+            const barX = LEFT_LABEL_W;
+
+            const escape = s => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+
+            let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${VB_W} ${VB_H}" `
+                    + `style="width:100%;max-width:1100px;height:auto;display:block;margin:auto">`;
+
+            // Header
+            svg += `<text x="10" y="24" fill="var(--fg)" font-size="16" font-weight="600" font-family="sans-serif">PCB Layer Stackup</text>`;
+            svg += `<text x="${barX + BAR_W + 20}" y="24" fill="var(--fg-faint)" font-size="12" font-family="sans-serif" text-anchor="start">Estimated — matrix-derived</text>`;
+
+            let y = 48;
+            for (const r of rows) {
+                const col = STACKUP_COLORS[r.type] || { fill: '#555', stroke: '#222' };
+                const hatch = r.dielectric ? ' fill-opacity="0.85"' : '';
+
+                // Bar
+                svg += `<rect x="${barX}" y="${y.toFixed(1)}" width="${BAR_W}" height="${r.h.toFixed(1)}" `
+                     + `fill="${col.fill}" stroke="${col.stroke}" stroke-width="1"${hatch} `
+                     + `data-name="${escape(r.name)}" data-type="${escape(r.type)}"/>`;
+
+                // Left label: name + type
+                const midY = y + r.h / 2 + 4;
+                svg += `<text x="${barX - 8}" y="${midY.toFixed(1)}" fill="var(--fg)" font-size="12" `
+                     + `font-family="sans-serif" text-anchor="end">${escape(r.name)}</text>`;
+                svg += `<text x="${barX - 8}" y="${(midY + 13).toFixed(1)}" fill="var(--fg-faint)" font-size="10" `
+                     + `font-family="sans-serif" text-anchor="end">${escape(r.type)}${r.side && r.side !== 'NEITHER' ? ' · ' + escape(r.side) : ''}</text>`;
+
+                // Right label: thickness + material + dk/df for dielectrics
+                let right = r.thicknessMm > 0
+                    ? r.thicknessMm.toFixed(r.thicknessMm < 0.01 ? 4 : 3) + ' mm'
+                    : '— mm';
+                const rightFaint = [];
+                if (r.material) rightFaint.push(escape(r.material));
+                if (r.dielectricConstant != null) rightFaint.push('Dk=' + r.dielectricConstant);
+                if (r.lossTangent != null) rightFaint.push('Df=' + r.lossTangent);
+                if (r.copperWeightOz != null) rightFaint.push(r.copperWeightOz + ' oz');
+
+                svg += `<text x="${barX + BAR_W + 8}" y="${midY.toFixed(1)}" fill="var(--fg)" font-size="12" `
+                     + `font-family="sans-serif">${right}</text>`;
+                svg += `<text x="${barX + BAR_W + 8}" y="${(midY + 13).toFixed(1)}" fill="var(--fg-faint)" font-size="10" `
+                     + `font-family="sans-serif">${rightFaint.join(' · ')}</text>`;
+
+                y += r.h + GAP;
+            }
+
+            // Total thickness footer
+            svg += `<line x1="${barX}" y1="${(y + 8).toFixed(1)}" x2="${barX + BAR_W}" y2="${(y + 8).toFixed(1)}" `
+                 + `stroke="var(--border)" stroke-width="1"/>`;
+            svg += `<text x="${barX - 8}" y="${(y + 28).toFixed(1)}" fill="var(--fg)" font-size="13" `
+                 + `font-weight="600" font-family="sans-serif" text-anchor="end">Total thickness</text>`;
+            svg += `<text x="${barX + BAR_W + 8}" y="${(y + 28).toFixed(1)}" fill="var(--fg)" font-size="13" `
+                 + `font-weight="600" font-family="sans-serif">${stackupTotalMm.toFixed(3)} mm</text>`;
+
+            svg += `</svg>`;
+            dataPanel.innerHTML = '<div style="padding:20px;">' + svg + '</div>';
+        }
+
+        // ===== BOM + centroid combined view =====
+        function bomRowSearchableText(r) {
+            return [
+                r.item, r.partNumber, r.packageName, r.manufacturer, r.mpn, r.ipn,
+                r.description, r.quantity,
+                ...(r.refdesList || []).map(p => p.refdes)
+            ].filter(x => x != null).join(' ').toLowerCase();
+        }
+
+        function bomRowSortValue(r, key) {
+            switch (key) {
+                case 'item':       return r.item == null ? Infinity : r.item;
+                case 'partNumber': return (r.partNumber || '').toLowerCase();
+                case 'packageName':return (r.packageName || '').toLowerCase();
+                case 'manufacturer':return (r.manufacturer || '').toLowerCase();
+                case 'mpn':        return (r.mpn || '').toLowerCase();
+                case 'quantity':   return r.quantity || 0;
+                case 'refdes':     return (r.refdesList || []).map(p => p.refdes).sort().join(',');
+                default:           return '';
+            }
+        }
+
+        function setBomSort(key) {
+            if (bomSortKey === key) bomSortDir = -bomSortDir;
+            else { bomSortKey = key; bomSortDir = 1; }
+            renderBom();
+        }
+
+        function exportBomCsv() {
+            const header = ['Item','PartNumber','Package','Manufacturer','MPN','IPN','Quantity','RefDes','Description'];
+            const escape = v => {
+                v = (v == null ? '' : String(v));
+                return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+            };
+            const lines = [header.join(',')];
+            for (const r of billData || []) {
+                const refs = (r.refdesList || []).map(p => p.refdes).join(' ');
+                lines.push([r.item ?? '', r.partNumber, r.packageName, r.manufacturer, r.mpn,
+                            r.ipn, r.quantity, refs, r.description].map(escape).join(','));
+            }
+            const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = (currentFile?.name || 'pcb').replace(/\.(zip|tgz|tar\.gz)$/i,'') + '-bom.csv';
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+        }
+
+        function exportCentroidCsv() {
+            const header = ['RefDes','PartNumber','Side','X_mm','Y_mm','Rotation_deg','Mirror'];
+            const escape = v => {
+                v = (v == null ? '' : String(v));
+                return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+            };
+            const lines = [header.join(',')];
+            for (const r of billData || []) {
+                for (const p of r.refdesList || []) {
+                    lines.push([p.refdes, r.partNumber, p.side,
+                                p.xMm?.toFixed(4), p.yMm?.toFixed(4),
+                                p.rotation, p.mirror].map(escape).join(','));
+                }
+            }
+            const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = (currentFile?.name || 'pcb').replace(/\.(zip|tgz|tar\.gz)$/i,'') + '-centroid.csv';
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+        }
+
+        function renderBom() {
+            svgContainer.classList.add('hidden');
+            dataPanel.classList.remove('hidden');
+            if (!billData || billData.length === 0) {
+                dataPanel.innerHTML = '<div style="color:var(--fg-faint);text-align:center;padding:40px;">No BOM data in this archive.</div>';
+                return;
+            }
+
+            const filterText = (bomFilter || '').toLowerCase().trim();
+            let rows = billData;
+            if (filterText) rows = rows.filter(r => bomRowSearchableText(r).includes(filterText));
+            rows = rows.slice().sort((a, b) => {
+                const av = bomRowSortValue(a, bomSortKey);
+                const bv = bomRowSortValue(b, bomSortKey);
+                if (av < bv) return -1 * bomSortDir;
+                if (av > bv) return  1 * bomSortDir;
+                return 0;
+            });
+
+            const totalRefdes = (billData || []).reduce((s, r) => s + (r.refdesList?.length || 0), 0);
+            const escape = s => (s == null ? '' : String(s))
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+            const sortIndicator = key =>
+                bomSortKey === key ? (bomSortDir > 0 ? ' ▲' : ' ▼') : '';
+
+            let html = '';
+            html += '<div class="bom-toolbar">';
+            html += `<span class="bom-summary">${rows.length} of ${billData.length} parts · ${totalRefdes} placed components</span>`;
+            html += `<input class="bom-search" type="search" placeholder="Filter parts, refdes, descriptions…" value="${escape(bomFilter)}" oninput="bomFilter=this.value;renderBom();this.focus()">`;
+            html += `<button class="bom-export" onclick="exportBomCsv()">Export BOM CSV</button>`;
+            html += `<button class="bom-export" onclick="exportCentroidCsv()">Export Centroid CSV</button>`;
+            html += '</div>';
+
+            html += '<div class="bom-table-wrap"><table class="bom-table">';
+            html += '<thead><tr>';
+            const cols = [
+                ['item', '#'],
+                ['partNumber', 'Part Number'],
+                ['packageName', 'Package'],
+                ['manufacturer', 'Manufacturer'],
+                ['mpn', 'MPN'],
+                ['quantity', 'Qty'],
+                ['refdes', 'RefDes (hover for centroid)'],
+            ];
+            for (const [key, label] of cols) {
+                html += `<th onclick="setBomSort('${key}')">${escape(label)}${sortIndicator(key)}</th>`;
+            }
+            html += '<th>Description</th>';
+            html += '</tr></thead><tbody>';
+
+            for (const r of rows) {
+                html += '<tr' + (r.orphan ? ' class="orphan"' : '') + '>';
+                html += `<td class="num">${r.item != null ? r.item : '—'}</td>`;
+                html += `<td>${escape(r.partNumber)}</td>`;
+                html += `<td>${escape(r.packageName)}</td>`;
+                html += `<td>${escape(r.manufacturer)}</td>`;
+                html += `<td>${escape(r.mpn)}</td>`;
+                html += `<td class="num">${r.quantity || (r.refdesList?.length ?? 0)}</td>`;
+                html += '<td class="refdes-cell">';
+                for (const p of r.refdesList || []) {
+                    const tt = `${p.refdes} · ${p.side || '—'} · `
+                            + `${(p.xMm ?? 0).toFixed(3)}, ${(p.yMm ?? 0).toFixed(3)} mm · `
+                            + `rot ${p.rotation ?? 0}° · mirror ${p.mirror || '—'}`;
+                    const cls = 'refdes-pill side-' + (p.side || 'NEITHER').toLowerCase();
+                    html += `<span class="${cls}" `
+                          + `data-x="${p.xMm}" data-y="${p.yMm}" data-rot="${p.rotation}" `
+                          + `data-side="${p.side}" data-mirror="${p.mirror}" `
+                          + `title="${escape(tt)}">${escape(p.refdes)}</span>`;
+                }
+                html += '</td>';
+                html += `<td class="description" title="${escape(r.description)}">${escape(r.description)}</td>`;
+                html += '</tr>';
+            }
+            html += '</tbody></table></div>';
+            dataPanel.innerHTML = html;
+        }
+
+        // ===== Layer list =====
+        let visibilityBeforeHover = null;
+
+        function renderLayerList() {
+            if (layers.length === 0) {
+                layerList.innerHTML = '<div class="no-layers">No layers loaded</div>';
+                return;
+            }
+            layerList.innerHTML = layers.map((layer, index) => {
+                const label = LAYER_TYPE_LABELS[layer.type] || layer.type;
+                const ctx = layer.context ? ` ${layer.context.charAt(0)}${layer.context.slice(1).toLowerCase()}` : '';
+                return `<div class="layer-item" data-index="${index}"
+                        onmouseenter="hoverLayerStart(${index})"
+                        onmouseleave="hoverLayerEnd()">
+                    <input type="checkbox" ${layer.visible ? 'checked' : ''}
+                        onclick="event.stopPropagation(); toggleLayer(${index})">
+                    <div class="color-dot" style="background: ${layer.color}"></div>
+                    <span class="name" title="${layer.name}" onclick="toggleLayer(${index})" style="cursor:pointer">${layer.name}</span>
+                    <span class="layer-type-badge">${label}${ctx}</span>
+                </div>`;
+            }).join('');
+            updateSelectAllCheckbox();
+        }
+
+        function updateSelectAllCheckbox() {
+            const cb = document.getElementById('select-all-layers');
+            if (!cb || layers.length === 0) return;
+            const visCount = layers.filter(l => l.visible).length;
+            cb.checked = visCount === layers.length;
+            cb.indeterminate = visCount > 0 && visCount < layers.length;
+        }
+
+        function toggleAllLayers() {
+            const cb = document.getElementById('select-all-layers');
+            const newState = cb.checked;
+            layers.forEach(l => l.visible = newState);
+            applyLayerVisibility();
+            renderLayerList();
+        }
+
+        function selectSide(side) {
+            layers.forEach(l => {
+                const isDrill = l.type === 'DRILL' || l.type === 'ROUT';
+                const isProfile = l.type === 'PROFILE';
+                const matchesSide = l.context === side;
+                l.visible = isDrill || isProfile || matchesSide;
+            });
+            applyLayerVisibility();
+            renderLayerList();
+        }
+
+        function toggleLayer(index) {
+            layers[index].visible = !layers[index].visible;
+            applyLayerVisibility();
+            renderLayerList();
+        }
+
+        function applyLayerVisibility() {
+            if (currentView !== 'layers') return;
+            for (const layer of layers) {
+                const el = svgContent.querySelector(`#${CSS.escape(layer.id)}`);
+                if (el) el.setAttribute('display', layer.visible ? 'inline' : 'none');
+            }
+        }
+
+        function hoverLayerStart(index) {
+            if (currentView !== 'layers') return;
+            visibilityBeforeHover = layers.map(l => l.visible);
+            for (let i = 0; i < layers.length; i++) {
+                const el = svgContent.querySelector(`#${CSS.escape(layers[i].id)}`);
+                if (el) el.setAttribute('display', i === index ? 'inline' : 'none');
+            }
+        }
+
+        function hoverLayerEnd() {
+            if (currentView !== 'layers' || !visibilityBeforeHover) return;
+            for (let i = 0; i < layers.length; i++) {
+                const el = svgContent.querySelector(`#${CSS.escape(layers[i].id)}`);
+                if (el) el.setAttribute('display', visibilityBeforeHover[i] ? 'inline' : 'none');
+            }
+            visibilityBeforeHover = null;
+        }
+
+        // ===== Pan & Zoom =====
+        svgContainer.addEventListener('mousedown', (e) => {
+            if (e.button === 0) { isPanning = true; startX = e.clientX - panX; startY = e.clientY - panY; }
+        });
+        document.addEventListener('mousemove', (e) => {
+            if (isPanning) { panX = e.clientX - startX; panY = e.clientY - startY; updateTransform(); }
+        });
+        document.addEventListener('mouseup', () => { isPanning = false; });
+
+        svgContainer.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const rect = svgContainer.getBoundingClientRect();
+            const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            const ns = Math.max(0.1, Math.min(50, scale * delta));
+            panX = mx - (mx - panX) * (ns / scale);
+            panY = my - (my - panY) * (ns / scale);
+            scale = ns;
+            updateTransform();
+        });
+
+        document.getElementById('zoom-in').addEventListener('click', () => {
+            const r = svgContainer.getBoundingClientRect();
+            const cx = r.width/2, cy = r.height/2;
+            const ns = Math.min(50, scale * 1.25);
+            panX = cx - (cx - panX) * (ns / scale); panY = cy - (cy - panY) * (ns / scale);
+            scale = ns; updateTransform();
+        });
+        document.getElementById('zoom-out').addEventListener('click', () => {
+            const r = svgContainer.getBoundingClientRect();
+            const cx = r.width/2, cy = r.height/2;
+            const ns = Math.max(0.1, scale * 0.8);
+            panX = cx - (cx - panX) * (ns / scale); panY = cy - (cy - panY) * (ns / scale);
+            scale = ns; updateTransform();
+        });
+        document.getElementById('zoom-fit').addEventListener('click', fitToView);
+
+        function fitToView() {
+            const svg = svgContent.querySelector('svg');
+            if (!svg) return;
+            const rect = svgContainer.getBoundingClientRect();
+            const vb = svg.getAttribute('viewBox');
+            if (!vb) return;
+            const [,,w,h] = vb.split(' ').map(Number);
+            const sw = w * PX_PER_MM, sh = h * PX_PER_MM;
+            const pad = 40;
+            scale = Math.min((rect.width - pad*2) / sw, (rect.height - pad*2) / sh, 10);
+            panX = (rect.width - sw * scale) / 2;
+            panY = (rect.height - sh * scale) / 2;
+            updateTransform();
+        }
+
+        function updateTransform() {
+            svgContent.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+            zoomLevel.textContent = Math.round(scale * 100) + '%';
+        }
+
+        // ===== UI helpers =====
+        function showFileInfo(filename, stepCount) {
+            const container = document.getElementById('file-info-container');
+            container.innerHTML = `<div class="file-info">Loaded: ${filename} (${stepCount} step${stepCount !== 1 ? 's' : ''})</div>`;
+        }
+
+        // ===== Theme toggle =====
+        function toggleTheme() {
+            const isDark = document.body.classList.toggle('dark');
+            document.body.classList.toggle('light', !isDark);
+            localStorage.setItem('odbpp-viewer-theme', isDark ? 'dark' : 'light');
+            updateThemeIcon();
+        }
+
+        function updateThemeIcon() {
+            const isDark = document.body.classList.contains('dark');
+            const rays = document.getElementById('theme-icon-rays');
+            if (rays) rays.style.display = isDark ? '' : 'none';
+        }
+
+        function applyStoredTheme() {
+            const stored = localStorage.getItem('odbpp-viewer-theme');
+            let isDark;
+            if (stored) {
+                isDark = stored === 'dark';
+            } else {
+                isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            }
+            document.body.classList.toggle('dark', isDark);
+            document.body.classList.toggle('light', !isDark);
+            updateThemeIcon();
+        }
+        applyStoredTheme();
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+            if (!localStorage.getItem('odbpp-viewer-theme')) applyStoredTheme();
+        });
+
+        // ===== Init =====
+        updateTransform();
+        (async () => {
+            await initDb();
+            renderRecentProjects();
+        })();
+    </script>
+</body>
+</html>

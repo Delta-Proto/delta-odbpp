@@ -1,0 +1,45 @@
+# Excluded folder - third-party references and non-company testdata
+/excluded/
+
+# Private / customer test data — must never be committed
+/testdata/
+
+# Examples: ignore everything except the public, openly-available sample archives
+/examples/*
+!/examples/designodb_rigidflex.tgz
+!/examples/flat_hierarchy-odb.tgz
+!/examples/sandbox-odb_pc4.tgz
+!/examples/sandbox-odb_wifi.tgz
+!/examples/video-odb.tgz
+
+# Maven
+/target/
+*/target/
+
+# IDE
+/.idea/
+*.iml
+.project
+.classpath
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Logs
+*.log
+
+# LLM / spec-processing scratch
+/docs/llm/
+/docs/_marker_tmp/
+
+# Secrets
+.mvn-gpg-passphrase
+
+# Claude Code local session/settings
+.claude/

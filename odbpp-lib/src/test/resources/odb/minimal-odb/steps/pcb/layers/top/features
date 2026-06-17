@@ -1,0 +1,52 @@
+UNITS=MM
+#
+# Feature symbol names - known sizes for verification
+# For UNITS=MM, symbol dimensions are in MICRONS (1/1000 mm)
+# r1000 = 1000 microns = 1mm diameter
+#
+$0 r1000
+$1 r2000
+$2 r5000
+
+#
+# Feature attribute names
+#
+@0 .geometry
+
+#
+# Features with known coordinates for SVG verification
+#
+
+# Pad at (10, 10) with radius 0.5mm (symbol $0 = r1000 = 1mm diameter)
+P 10 10 0 P 0 8 0
+
+# Pad at (20, 10) with radius 1mm (symbol $1 = r2000 = 2mm diameter)
+P 20 10 1 P 0 8 0
+
+# Pad at (30, 10) with radius 2.5mm (symbol $2 = r5000 = 5mm diameter)
+P 30 10 2 P 0 8 0
+
+# Line from (10, 20) to (30, 20) with width from $0
+L 10 20 30 20 0 P 0
+
+# Line from (10, 30) to (30, 30) with width from $1
+L 10 30 30 30 1 P 0
+
+# Diagonal line from (10, 40) to (30, 50)
+L 10 40 30 50 0 P 0
+
+# Arc from (50, 40) to (60, 50) with center at (50, 50) - quarter circle
+A 50 40 60 50 50 50 0 P 0 N
+
+# Grid of pads for easy visual verification
+P 50 10 0 P 0 8 0
+P 60 10 0 P 0 8 0
+P 70 10 0 P 0 8 0
+P 80 10 0 P 0 8 0
+P 90 10 0 P 0 8 0
+
+P 50 20 0 P 0 8 0
+P 60 20 0 P 0 8 0
+P 70 20 0 P 0 8 0
+P 80 20 0 P 0 8 0
+P 90 20 0 P 0 8 0
