@@ -3,7 +3,11 @@
 A Java library for parsing ODB++ PCB design archives, rendering them to SVG/PNG,
 and converting them to Gerber X2 + Excellon. Ships with an interactive web viewer.
 
-![ODB++ Viewer](docs/Screenshot%202026-01-05%20at%2011.08.12.png)
+![ODB++ Viewer — Board Top](docs/screenshot-board-top.png)
+
+| Layer Stackup | Component Placement |
+|---------------|---------------------|
+| ![PCB layer stackup](docs/screenshot-stackup.png) | ![Component placement](docs/screenshot-components.png) |
 
 ## Maven Dependency
 
