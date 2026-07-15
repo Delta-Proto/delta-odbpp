@@ -1,5 +1,7 @@
 package com.deltaproto.deltaodbpp.parser;
 
+import com.deltaproto.deltaodbpp.OdbText;
+
 import com.deltaproto.deltaodbpp.model.EdaData;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -16,7 +18,7 @@ public class EdaDataParser {
         edaData.setNetRecordsByName(new HashMap<>());
         edaData.setPackageRecordsByName(new HashMap<>());
 
-        try (BufferedReader reader = Files.newBufferedReader(dataFile)) {
+        try (BufferedReader reader = OdbText.newBufferedReader(dataFile)) {
             String line;
             while ((line = reader.readLine()) != null) {
                 line = line.trim();

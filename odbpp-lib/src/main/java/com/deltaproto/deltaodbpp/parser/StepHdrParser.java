@@ -1,5 +1,7 @@
 package com.deltaproto.deltaodbpp.parser;
 
+import com.deltaproto.deltaodbpp.OdbText;
+
 import com.deltaproto.deltaodbpp.model.StepHdr;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -15,7 +17,7 @@ public class StepHdrParser {
         StepHdr stepHdr = new StepHdr();
         stepHdr.setStepRepeats(new ArrayList<>());
 
-        try (BufferedReader reader = Files.newBufferedReader(stepHdrFile)) {
+        try (BufferedReader reader = OdbText.newBufferedReader(stepHdrFile)) {
             String line;
             while ((line = reader.readLine()) != null) {
                 line = line.trim();

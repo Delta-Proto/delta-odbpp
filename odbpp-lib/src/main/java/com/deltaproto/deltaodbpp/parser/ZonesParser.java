@@ -1,5 +1,7 @@
 package com.deltaproto.deltaodbpp.parser;
 
+import com.deltaproto.deltaodbpp.OdbText;
+
 import com.deltaproto.deltaodbpp.model.Zone;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -11,7 +13,7 @@ import java.util.List;
 public class ZonesParser {
     public List<Zone> parse(Path zonesFile) throws IOException {
         List<Zone> zones = new ArrayList<>();
-        try (BufferedReader reader = Files.newBufferedReader(zonesFile)) {
+        try (BufferedReader reader = OdbText.newBufferedReader(zonesFile)) {
             String line;
             while ((line = reader.readLine()) != null) {
                 if (line.startsWith("ZONE")) {

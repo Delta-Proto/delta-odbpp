@@ -23,9 +23,17 @@ public class StepParser {
         Step step = new Step();
         step.setName(stepDir.getFileName().toString());
 
+        // Each optional sub-file is parsed defensively: a single malformed or
+        // unreadable section must not discard the whole step (which would drop
+        // the component layers and make a valid job look empty). The layers loop
+        // below already follows this pattern.
         Path stepHdrFile = stepDir.resolve("stephdr");
         if (Files.exists(stepHdrFile)) {
-            step.setStepHdr(stepHdrParser.parse(stepHdrFile));
+            try {
+                step.setStepHdr(stepHdrParser.parse(stepHdrFile));
+            } catch (Exception e) {
+                logger.warn("Failed to parse stephdr for step {}: {}", step.getName(), e.getMessage());
+            }
         }
 
         // Determine the mm-conversion scale once for the entire step. ODB++
@@ -37,14 +45,22 @@ public class StepParser {
 
         Path attrlistFile = stepDir.resolve("attrlist");
         if (Files.exists(attrlistFile)) {
-            step.setAttrList(attrListParser.parse(attrlistFile));
+            try {
+                step.setAttrList(attrListParser.parse(attrlistFile));
+            } catch (Exception e) {
+                logger.warn("Failed to parse attrlist for step {}: {}", step.getName(), e.getMessage());
+            }
         }
 
         Path edaDir = stepDir.resolve("eda");
         if (Files.exists(edaDir)) {
             Path dataFile = edaDir.resolve("data");
             if (Files.exists(dataFile)) {
-                step.setEdaData(edaDataParser.parse(dataFile));
+                try {
+                    step.setEdaData(edaDataParser.parse(dataFile));
+                } catch (Exception e) {
+                    logger.warn("Failed to parse eda/data for step {}: {}", step.getName(), e.getMessage());
+                }
             }
         }
 
@@ -55,8 +71,8 @@ public class StepParser {
                 stream.filter(Files::isDirectory).findFirst().ifPresent(bomDir -> {
                     try {
                         step.setBom(bomParser.parse(bomDir.resolve("bom")));
-                    } catch (IOException e) {
-                        // Handle exception
+                    } catch (Exception e) {
+                        logger.warn("Failed to parse bom for step {}: {}", step.getName(), e.getMessage());
                     }
                 });
             }
@@ -64,17 +80,29 @@ public class StepParser {
 
         Path profileFile = stepDir.resolve("profile");
         if (Files.exists(profileFile)) {
-            step.setProfile(featuresFileParser.parse(profileFile, mmScale));
+            try {
+                step.setProfile(featuresFileParser.parse(profileFile, mmScale));
+            } catch (Exception e) {
+                logger.warn("Failed to parse profile for step {}: {}", step.getName(), e.getMessage());
+            }
         }
 
         Path impedanceFile = stepDir.resolve("impedance.xml");
         if (Files.exists(impedanceFile)) {
-            step.setImpedance(impedanceParser.parse(impedanceFile));
+            try {
+                step.setImpedance(impedanceParser.parse(impedanceFile));
+            } catch (Exception e) {
+                logger.warn("Failed to parse impedance for step {}: {}", step.getName(), e.getMessage());
+            }
         }
 
         Path zonesFile = stepDir.resolve("zones");
         if (Files.exists(zonesFile)) {
-            step.setZones(zonesParser.parse(zonesFile));
+            try {
+                step.setZones(zonesParser.parse(zonesFile));
+            } catch (Exception e) {
+                logger.warn("Failed to parse zones for step {}: {}", step.getName(), e.getMessage());
+            }
         }
 
         Path layersDir = stepDir.resolve("layers");

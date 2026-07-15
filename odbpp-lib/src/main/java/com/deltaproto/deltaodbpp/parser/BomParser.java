@@ -1,5 +1,7 @@
 package com.deltaproto.deltaodbpp.parser;
 
+import com.deltaproto.deltaodbpp.OdbText;
+
 import com.deltaproto.deltaodbpp.model.Bom;
 import com.deltaproto.deltaodbpp.model.BomItem;
 import com.deltaproto.deltaodbpp.model.QualificationStatus;
@@ -18,7 +20,7 @@ public class BomParser {
      * Parse a BOM file from a file path
      */
     public Bom parse(Path bomFile) throws IOException {
-        try (BufferedReader reader = Files.newBufferedReader(bomFile)) {
+        try (BufferedReader reader = OdbText.newBufferedReader(bomFile)) {
             return parse(reader, bomFile.getParent().getFileName().toString());
         }
     }

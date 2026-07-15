@@ -1,5 +1,7 @@
 package com.deltaproto.deltaodbpp.parser;
 
+import com.deltaproto.deltaodbpp.OdbText;
+
 import com.deltaproto.deltaodbpp.model.Matrix;
 import com.deltaproto.deltaodbpp.model.MatrixLayer;
 import com.deltaproto.deltaodbpp.model.Step;
@@ -18,7 +20,7 @@ public class MatrixParser {
         matrix.setLayers(new ArrayList<>());
         matrix.setSteps(new ArrayList<>());
 
-        try (BufferedReader reader = Files.newBufferedReader(matrixFile)) {
+        try (BufferedReader reader = OdbText.newBufferedReader(matrixFile)) {
             String line;
             while ((line = reader.readLine()) != null) {
                 line = line.trim();

@@ -1,5 +1,7 @@
 package com.deltaproto.deltaodbpp.parser;
 
+import com.deltaproto.deltaodbpp.OdbText;
+
 import com.deltaproto.deltaodbpp.model.Notes;
 import com.deltaproto.deltaodbpp.model.Notes.Note;
 import com.deltaproto.deltaodbpp.model.Polarity;
@@ -20,7 +22,7 @@ public class NotesParser {
     public Notes parse(Path notesFile) throws IOException {
         Notes notes = new Notes();
 
-        try (BufferedReader reader = Files.newBufferedReader(notesFile)) {
+        try (BufferedReader reader = OdbText.newBufferedReader(notesFile)) {
             String line;
             while ((line = reader.readLine()) != null) {
                 line = line.trim();
