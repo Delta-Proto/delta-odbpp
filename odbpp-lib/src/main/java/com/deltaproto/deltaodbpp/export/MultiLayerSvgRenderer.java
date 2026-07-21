@@ -1247,7 +1247,15 @@ public class MultiLayerSvgRenderer {
         // Derive the missing dimension from the viewBox so the PNG's aspect ratio matches the
         // board's extent. Passing both dimensions explicitly avoids ambiguity in how Batik
         // resolves a single KEY_WIDTH/KEY_HEIGHT hint, keeping the reported scale exact.
-        if ((widthPx <= 0 || heightPx <= 0) && vb != null && vb[2] > 0 && vb[3] > 0) {
+        if (widthPx <= 0 || heightPx <= 0) {
+            // Only one dimension was given; the other must be derived from the viewBox aspect. A
+            // degenerate viewBox (missing, or zero width/height for an empty/point-like board)
+            // leaves the missing dimension 0, which Batik rejects with an opaque error — fail fast
+            // with a clear message instead.
+            if (vb == null || vb[2] <= 0 || vb[3] <= 0) {
+                throw new IllegalStateException("board has no renderable extent (viewBox "
+                        + (vb != null ? vb[2] + "x" + vb[3] : "absent") + ")");
+            }
             double aspect = vb[2] / vb[3];
             if (widthPx <= 0) {
                 widthPx = (int) Math.max(1, Math.round(heightPx * aspect));
