@@ -1155,10 +1155,11 @@ public class MultiLayerSvgRenderer {
      *   pxY = originYpx - gyMm * pxPerMm;   // minus: ODB++ Y-up vs pixel Y-down
      * </pre>
      *
-     * <p><b>Units:</b> the mm-rectangle is only truly millimetres when the renderer's
-     * {@link SvgRenderOptions.OutputUnit} is {@code MM}. With the default {@code INCH} output the
-     * rectangle and {@code pxPerMm} are expressed in the viewBox unit (inches). Configure the
-     * renderer with {@code OutputUnit.MM} for mm semantics matching delta-gerber.
+     * <p><b>Units:</b> the mm-rectangle and {@link #pxPerMm} are always true millimetres,
+     * regardless of the renderer's configured {@link SvgRenderOptions.OutputUnit}. The model is
+     * mm-native at parse time and the output unit only scales the SVG coordinate space; this class
+     * converts the viewBox extent back to mm so the mm-named fields never carry inch values. The
+     * semantics match delta-gerber's {@code PngWithScale}.
      */
     public static final class PngWithScale {
         /** PNG bytes. */
@@ -1258,14 +1259,30 @@ public class MultiLayerSvgRenderer {
 
         byte[] png = rasterizeSvgToPng(svg, widthPx, heightPx);
 
-        double minXmm  = vb != null ? vb[0] : 0;
-        double minYmm  = vb != null ? vb[1] : 0;
-        double widthMm  = vb != null ? vb[2] : 0;
-        double heightMm = vb != null ? vb[3] : 0;
+        // The viewBox is expressed in the renderer's configured output unit, not necessarily
+        // mm: MM output leaves board coordinates as-is, INCH output divides them by 25.4. The
+        // model itself is mm-native at parse time, so we scale the viewBox extent back to true
+        // millimetres per unit to keep PngWithScale's mm fields honest whatever the OutputUnit.
+        double toMm = outputUnitToMm();
+        double minXmm  = (vb != null ? vb[0] : 0) * toMm;
+        double minYmm  = (vb != null ? vb[1] : 0) * toMm;
+        double widthMm  = (vb != null ? vb[2] : 0) * toMm;
+        double heightMm = (vb != null ? vb[3] : 0) * toMm;
         Side side = topSide ? Side.TOP : Side.BOTTOM;
         boolean mirrored = !topSide; // bottom view is X-mirrored (physical underside)
         return new PngWithScale(png, widthPx, heightPx,
                 minXmm, minYmm, widthMm, heightMm, side, mirrored);
+    }
+
+    /**
+     * The factor that converts a value expressed in the renderer's configured output unit back
+     * to millimetres: {@code 1.0} for {@code MM}, {@code 25.4} for {@code INCH}. The viewBox and
+     * scale live in output units, but {@link PngWithScale}'s mm fields must always be true mm.
+     */
+    private double outputUnitToMm() {
+        return baseOptions.getOutputUnit() == SvgRenderOptions.OutputUnit.MM
+                ? 1.0
+                : SvgRenderOptions.INCH_TO_MM;
     }
 
     /**

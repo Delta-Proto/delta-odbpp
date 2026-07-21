@@ -90,6 +90,67 @@ class RealisticPngWithScaleTest {
                 () -> newRenderer().renderRealisticSidePngWithScale(job, true, 0, 0));
     }
 
+    /**
+     * The mm-named fields of {@link MultiLayerSvgRenderer.PngWithScale} must always be true
+     * millimetres, whatever the renderer's {@link SvgRenderOptions.OutputUnit}. Historically the
+     * viewBox — and hence these fields — carried the output unit (inches by default), so an
+     * INCH-configured renderer reported ~1/25.4 of the real mm size. Render the same board with
+     * MM output (default) and INCH output and assert the mm fields agree.
+     */
+    @Test
+    void mmFields_areMillimetres_regardlessOfOutputUnit() throws IOException {
+        MultiLayerSvgRenderer.PngWithScale mm =
+                renderer(SvgRenderOptions.OutputUnit.MM)
+                        .renderRealisticSidePngWithScale(job, true, 1000, 0);
+        MultiLayerSvgRenderer.PngWithScale inch =
+                renderer(SvgRenderOptions.OutputUnit.INCH)
+                        .renderRealisticSidePngWithScale(job, true, 1000, 0);
+
+        // Tolerance covers the last-digit rounding of the viewBox string: MM output writes the
+        // rectangle in mm at %.4f, INCH output writes it in inches at %.4f then we scale by 25.4,
+        // so 0.0001 inch ≈ 0.0025 mm of formatting slack. The old bug was off by a factor of 25.4.
+        double tol = 0.01; // mm
+        assertEquals(mm.widthMm, inch.widthMm, tol, "widthMm must match across output units");
+        assertEquals(mm.heightMm, inch.heightMm, tol, "heightMm must match across output units");
+        assertEquals(mm.minXmm, inch.minXmm, tol, "minXmm must match across output units");
+        assertEquals(mm.minYmm, inch.minYmm, tol, "minYmm must match across output units");
+        // pxPerMm follows the same rectangle at the same pixel size, so it must agree too.
+        assertEquals(mm.pxPerMm, inch.pxPerMm, 1e-3, "pxPerMm must match across output units");
+    }
+
+    /**
+     * The reported mm size matches the board's known physical extent. Uses the small openly
+     * available sandbox-odb_wifi sample whose {@code pcb} step is ≈30.0 × 26.8 mm; the viewBox
+     * adds a small padding on each side, so the reported rectangle is a little larger than the
+     * bare board but must be within a few mm and clearly on the order of tens of mm (not tenths
+     * of an inch, which the old inch-valued fields would have been ≈1.18 × 1.06).
+     */
+    @Test
+    void mmFields_matchKnownBoardSize(@TempDir Path tempDir) throws IOException {
+        assertTrue(Fixtures.hasSample(Fixtures.SMALL_SAMPLE),
+                "sandbox-odb_wifi sample must be present");
+        Job wifi = Fixtures.parseSample(Fixtures.SMALL_SAMPLE, tempDir);
+
+        MultiLayerSvgRenderer.PngWithScale mm =
+                renderer(SvgRenderOptions.OutputUnit.MM)
+                        .renderRealisticSidePngWithScale(wifi, true, 1000, 0);
+        MultiLayerSvgRenderer.PngWithScale inch =
+                renderer(SvgRenderOptions.OutputUnit.INCH)
+                        .renderRealisticSidePngWithScale(wifi, true, 1000, 0);
+
+        // Board is ~30.0 x 26.8 mm; viewBox adds padding so allow a few mm of slack.
+        assertEquals(30.0, mm.widthMm, 6.0, "widthMm should reflect the ~30 mm board width");
+        assertEquals(26.8, mm.heightMm, 6.0, "heightMm should reflect the ~26.8 mm board height");
+
+        // And the two output units agree (the core guarantee).
+        assertEquals(mm.widthMm, inch.widthMm, 1e-3);
+        assertEquals(mm.heightMm, inch.heightMm, 1e-3);
+    }
+
+    private MultiLayerSvgRenderer renderer(SvgRenderOptions.OutputUnit unit) {
+        return new MultiLayerSvgRenderer(new SvgRenderOptions().withOutputUnit(unit));
+    }
+
     // ---- helpers ----
 
     private static void assertPngMagic(byte[] png) {
