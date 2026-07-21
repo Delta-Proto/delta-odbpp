@@ -30,9 +30,120 @@ public class MultiLayerSvgRenderer {
     private static final String FR4_COLOR = "#666666";           // Dark gray substrate
     private static final String COPPER_COLOR = "#cccccc";         // Silver/gray copper under soldermask
     private static final String COPPER_FINISH_COLOR = "#cc9933";  // Gold HASL/ENIG finish on exposed pads
-    private static final String SOLDERMASK_GREEN = "#004200";     // Dark green soldermask
-    private static final String SILKSCREEN_WHITE = "#ffffff";     // White silkscreen
     private static final double SOLDERMASK_OPACITY = 0.75;
+
+    /** Which side of the board a realistic render / colour setter applies to. */
+    public enum Side { TOP, BOTTOM }
+
+    // Soldermask + silkscreen colors for the realistic render, held per side so a board
+    // masked green on top and black underneath renders as one. Default to the realistic
+    // dark green with the white legend it pairs with; override via
+    // setSoldermaskColor/setSilkscreenColor. Mirrors delta-gerber's MultiLayerSVGRenderer.
+    private final SideColors topColors = new SideColors();
+    private final SideColors bottomColors = new SideColors();
+
+    /**
+     * The soldermask and silkscreen fills for one side of the board. A {@code null} fill
+     * means that finish is not applied: the realistic render draws no mask sheet, or no
+     * legend, rather than substituting a color.
+     *
+     * <p>Silkscreen carries three states — unset, a color, or none — so that the two
+     * setters commute. Unset takes the color the mask pairs with, which is what a fab does
+     * when you don't ask; once a caller names a {@link SilkscreenColor}, a later
+     * {@link SoldermaskColor} re-pairs nothing and leaves the legend alone.
+     */
+    private static final class SideColors {
+        private String mask = SoldermaskColor.DEFAULT.getMaskColor();
+        private String pairedSilkscreen = SoldermaskColor.DEFAULT.getSilkscreenColor();
+        private String silkscreen;
+        private boolean silkscreenSet;
+
+        void setSoldermask(SoldermaskColor color) {
+            this.mask = color.getMaskColor();
+            this.pairedSilkscreen = color.getSilkscreenColor();
+        }
+
+        void setSoldermask(String maskColor) {
+            this.mask = maskColor;
+        }
+
+        void setSilkscreen(String color) {
+            this.silkscreen = color;
+            this.silkscreenSet = true;
+        }
+
+        /** The mask fill, or {@code null} when no soldermask is applied. */
+        String mask() {
+            return mask;
+        }
+
+        /** The legend fill, or {@code null} when no silkscreen is printed. */
+        String silkscreen() {
+            return silkscreenSet ? silkscreen : pairedSilkscreen;
+        }
+    }
+
+    private SideColors colorsFor(Side side) {
+        return side == Side.BOTTOM ? bottomColors : topColors;
+    }
+
+    private SideColors colorsFor(boolean topSide) {
+        return topSide ? topColors : bottomColors;
+    }
+
+    /**
+     * Set the soldermask color on both sides, for the realistic render and the PNG paths
+     * built on it. Unless {@link #setSilkscreenColor} says otherwise the legend takes the
+     * color this mask pairs with — black on white soldermask, white on every other. Defaults
+     * to {@link SoldermaskColor#GREEN}; {@link SoldermaskColor#NONE} leaves the copper bare.
+     */
+    public MultiLayerSvgRenderer setSoldermaskColor(SoldermaskColor color) {
+        topColors.setSoldermask(color);
+        bottomColors.setSoldermask(color);
+        return this;
+    }
+
+    /** As {@link #setSoldermaskColor(SoldermaskColor)}, but for one side of the board. */
+    public MultiLayerSvgRenderer setSoldermaskColor(Side side, SoldermaskColor color) {
+        colorsFor(side).setSoldermask(color);
+        return this;
+    }
+
+    /**
+     * Set explicit soldermask and silkscreen hex fills on both sides (e.g. {@code "#004200"}),
+     * for colors outside the {@link SoldermaskColor} palette. Either may be {@code null} to
+     * leave that finish off the board.
+     */
+    public MultiLayerSvgRenderer setSoldermaskColor(String maskColor, String silkscreenColor) {
+        topColors.setSoldermask(maskColor);
+        bottomColors.setSoldermask(maskColor);
+        return setSilkscreenColor(silkscreenColor);
+    }
+
+    /**
+     * Set the silkscreen color on both sides, overriding the color the soldermask pairs with.
+     * {@link SilkscreenColor#NONE} prints no legend at all. Order-independent: a later
+     * {@link #setSoldermaskColor} does not take this choice back.
+     */
+    public MultiLayerSvgRenderer setSilkscreenColor(SilkscreenColor color) {
+        return setSilkscreenColor(color.getColor());
+    }
+
+    /** As {@link #setSilkscreenColor(SilkscreenColor)}, but for one side of the board. */
+    public MultiLayerSvgRenderer setSilkscreenColor(Side side, SilkscreenColor color) {
+        colorsFor(side).setSilkscreen(color.getColor());
+        return this;
+    }
+
+    /**
+     * Set an explicit silkscreen hex fill on both sides, for colors outside the
+     * {@link SilkscreenColor} palette. {@code null} prints no legend.
+     */
+    public MultiLayerSvgRenderer setSilkscreenColor(String color) {
+        topColors.setSilkscreen(color);
+        bottomColors.setSilkscreen(color);
+        return this;
+    }
 
     private static final Map<String, String> LAYER_TYPE_COLORS = new LinkedHashMap<>();
 
@@ -54,6 +165,10 @@ public class MultiLayerSvgRenderer {
     private double globalMinY = Double.MAX_VALUE;
     private double globalMaxX = Double.MIN_VALUE;
     private double globalMaxY = Double.MIN_VALUE;
+
+    // When true (the per-layer preview path), renderFeature omits Text features so the
+    // lightweight thumbnail carries only geometry — cheaper to draw and legible when small.
+    private boolean previewMode = false;
 
     public MultiLayerSvgRenderer() {
         this(new SvgRenderOptions());
@@ -244,6 +359,189 @@ public class MultiLayerSvgRenderer {
 
         writeCloseTransformGroup(writer);
         writeSvgFooter(writer);
+    }
+
+    // ------------------------------------------------------------------
+    // Per-layer SVG API — one matrix layer as a standalone SVG, plus a
+    // lightweight preview variant for file-list thumbnails.
+    // ------------------------------------------------------------------
+
+    /** Cap on either dimension of a preview SVG's width/height attributes, in pixels. */
+    private static final double PREVIEW_MAX_DIMENSION_PX = 256.0;
+
+    /**
+     * Render a single matrix layer (by name) of the Job's first step to a standalone SVG
+     * string, using the same per-layer colour mapping and coordinate frame as
+     * {@link #renderStep(Step, Matrix, Writer)}. The board profile is drawn as a faint
+     * outline for context.
+     *
+     * @param job       the ODB++ job
+     * @param stepName  the step to render from, or {@code null} for the first step
+     * @param layerName the layer name (case-insensitive) to render
+     * @return a full standalone SVG document; an empty SVG if the layer is absent/empty
+     */
+    public String renderLayerSvg(Job job, String stepName, String layerName) throws IOException {
+        StringWriter writer = new StringWriter();
+        renderLayerSvg(job, stepName, layerName, writer);
+        return writer.toString();
+    }
+
+    /** As {@link #renderLayerSvg(Job, String, String)}, streaming to a {@link Writer}. */
+    public void renderLayerSvg(Job job, String stepName, String layerName, Writer writer)
+            throws IOException {
+        renderLayer(job, stepName, layerName, false, writer);
+    }
+
+    /**
+     * Render a lightweight <em>preview</em> of a single matrix layer, suitable for file-list
+     * thumbnails: a smaller target size (width/height capped at {@value #PREVIEW_MAX_DIMENSION_PX}px)
+     * and reduced detail — text features are skipped and no component overlays are drawn. Uses the
+     * same geometry and viewBox as {@link #renderLayerSvg(Job, String, String)} so the two align.
+     */
+    public String renderLayerPreviewSvg(Job job, String stepName, String layerName)
+            throws IOException {
+        StringWriter writer = new StringWriter();
+        renderLayerPreviewSvg(job, stepName, layerName, writer);
+        return writer.toString();
+    }
+
+    /** As {@link #renderLayerPreviewSvg(Job, String, String)}, streaming to a {@link Writer}. */
+    public void renderLayerPreviewSvg(Job job, String stepName, String layerName, Writer writer)
+            throws IOException {
+        renderLayer(job, stepName, layerName, true, writer);
+    }
+
+    private void renderLayer(Job job, String stepName, String layerName, boolean preview,
+            Writer writer) throws IOException {
+        if (job == null || job.getSteps() == null || job.getSteps().isEmpty() || layerName == null) {
+            writeEmptySvg(writer);
+            return;
+        }
+        initSymbolResolver(detectUseMillimeters(job));
+        Step step = stepName != null ? job.getSteps().get(stepName) : null;
+        if (step == null) {
+            step = job.getSteps().values().iterator().next();
+        }
+        renderLayerFromStep(step, job.getMatrix(), layerName, preview, writer);
+    }
+
+    /**
+     * Render a single named layer of a step to a standalone SVG. Every matrix layer type the
+     * multi-layer renderer can draw works through this path — it reuses the same
+     * {@link #renderLayerGroup} + {@link #renderFeature} machinery.
+     */
+    public void renderLayerFromStep(Step step, Matrix matrix, String layerName, boolean preview,
+            Writer writer) throws IOException {
+        if (step == null || step.getLayersByName() == null || layerName == null) {
+            writeEmptySvg(writer);
+            return;
+        }
+        if (symbolResolver == null) {
+            initSymbolResolver(false);
+        }
+
+        Map.Entry<String, Layer> hit =
+                findLayerEntryCaseInsensitive(step.getLayersByName(), layerName.toLowerCase(Locale.ROOT));
+        Layer layer = hit != null ? hit.getValue() : null;
+        if (layer == null || layer.getFeatures() == null
+                || layer.getFeatures().getFeatures().isEmpty()) {
+            writeEmptySvg(writer);
+            return;
+        }
+
+        LayerInfo info = makeLayerInfo(hit.getKey(), layer, matrixLayerFor(matrix, layerName), matrix);
+        if (info == null) {
+            writeEmptySvg(writer);
+            return;
+        }
+
+        // Bounds: the single layer plus the profile (so the outline frames the geometry and
+        // per-layer thumbnails of the same board share a coordinate frame).
+        resetGlobalBounds();
+        calculateGlobalBounds(List.of(layer));
+        if (step.getProfile() != null) {
+            calculateProfileBounds(step.getProfile());
+        }
+
+        boolean savedPreview = this.previewMode;
+        this.previewMode = preview;
+        try {
+            if (preview) {
+                writeSvgHeaderCapped(writer, PREVIEW_MAX_DIMENSION_PX);
+            } else {
+                writeSvgHeader(writer);
+            }
+            writeTransformGroup(writer);
+
+            // Faint profile outline for context — full render only. Previews drop it as part
+            // of the reduced-detail treatment (along with text), keeping thumbnails lean.
+            if (!preview && step.getProfile() != null
+                    && !step.getProfile().getFeatures().isEmpty()) {
+                renderProfileFromFeatures(step.getProfile(), writer);
+            }
+
+            renderLayerGroup(info, writer);
+
+            writeCloseTransformGroup(writer);
+            writeSvgFooter(writer);
+        } finally {
+            this.previewMode = savedPreview;
+        }
+    }
+
+    private static MatrixLayer matrixLayerFor(Matrix matrix, String layerName) {
+        if (matrix == null || matrix.getLayers() == null) return null;
+        for (MatrixLayer ml : matrix.getLayers()) {
+            if (ml.getName() != null && ml.getName().equalsIgnoreCase(layerName)) return ml;
+        }
+        return null;
+    }
+
+    /**
+     * Like {@link #writeSvgHeader}, but clamps the SVG's {@code width}/{@code height} attributes
+     * so neither exceeds {@code maxDimensionPx}, preserving aspect ratio. The viewBox (and hence
+     * the geometry) is unchanged — only the default rasterised/displayed size shrinks, which is
+     * what a preview thumbnail wants.
+     */
+    private void writeSvgHeaderCapped(Writer writer, double maxDimensionPx) throws IOException {
+        double minX = baseOptions.toOutputUnit(globalMinX);
+        double minY = baseOptions.toOutputUnit(globalMinY);
+        double maxX = baseOptions.toOutputUnit(globalMaxX);
+        double maxY = baseOptions.toOutputUnit(globalMaxY);
+        double padding = baseOptions.toOutputUnit(baseOptions.getPadding());
+
+        double vbW = (maxX - minX + 2 * padding) * baseOptions.getScale();
+        double vbH = (maxY - minY + 2 * padding) * baseOptions.getScale();
+
+        double pixelWidth;
+        double pixelHeight;
+        double dpi = baseOptions.getDpi();
+        if (baseOptions.getOutputUnit() == SvgRenderOptions.OutputUnit.INCH) {
+            pixelWidth = vbW * dpi;
+            pixelHeight = vbH * dpi;
+        } else {
+            pixelWidth = (vbW / SvgRenderOptions.INCH_TO_MM) * dpi;
+            pixelHeight = (vbH / SvgRenderOptions.INCH_TO_MM) * dpi;
+        }
+        double longest = Math.max(pixelWidth, pixelHeight);
+        if (longest > maxDimensionPx && longest > 0) {
+            double factor = maxDimensionPx / longest;
+            pixelWidth *= factor;
+            pixelHeight *= factor;
+        }
+
+        writer.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        writer.write(String.format(Locale.US, "<svg xmlns=\"http://www.w3.org/2000/svg\" " +
+                        "width=\"%.2f\" height=\"%.2f\" " +
+                        "viewBox=\"%.4f %.4f %.4f %.4f\" " +
+                        "preserveAspectRatio=\"xMidYMid meet\" " +
+                        "stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"0\" " +
+                        "fill-rule=\"nonzero\" data-layers=\"true\" data-preview=\"true\">\n",
+                pixelWidth, pixelHeight,
+                minX - padding,
+                minY - padding,
+                maxX - minX + 2 * padding,
+                maxY - minY + 2 * padding));
     }
 
     /**
@@ -500,21 +798,38 @@ public class MultiLayerSvgRenderer {
             writer.write("    </g>\n");
         }
 
-        // 4. Soldermask (green, semi-transparent) with silkscreen nested inside so silk
-        // is only visible over the mask, never over exposed pads.
-        if (hasSoldermask) {
+        // 4. Soldermask (semi-transparent, caller-configurable colour) with silkscreen nested
+        // inside so silk is only visible over the mask, never over exposed pads. The mask and
+        // legend colours come from the side's SideColors; either may be null to leave that
+        // finish off the board (SoldermaskColor.NONE / SilkscreenColor.NONE).
+        SideColors sideColors = colorsFor(topSide);
+        String smColor = sideColors.mask();
+        String ssColor = sideColors.silkscreen();
+        if (hasSoldermask && (smColor != null || ssColor != null)) {
             writer.write(String.format(
                     "    <g data-stack-layer=\"soldermask\" mask=\"url(#%s)\">\n", smMaskId));
-            writer.write(String.format(Locale.US, "      <rect %s fill=\"%s\" opacity=\"%.2f\"/>\n",
-                    fullRect, SOLDERMASK_GREEN, SOLDERMASK_OPACITY));
 
-            for (LayerInfo info : silkscreenLayers) {
-                writer.write(String.format(
-                        "      <g data-stack-layer=\"silkscreen\" data-layer-name=\"%s\" " +
-                                "fill=\"%s\" stroke=\"%s\" stroke-width=\"0\">\n",
-                        escapeAttr(info.name), SILKSCREEN_WHITE, SILKSCREEN_WHITE));
-                renderLayerFeaturesRealistic(info.layer.getFeatures(), writer, SILKSCREEN_WHITE, SOLDERMASK_GREEN);
-                writer.write("      </g>\n");
+            // Soldermask fill. The pcb-soldermask class lets a viewer recolor the mask
+            // client-side without a server round-trip. Skipped for a board ordered bare.
+            if (smColor != null) {
+                writer.write(String.format(Locale.US,
+                        "      <rect class=\"pcb-soldermask\" %s fill=\"%s\" opacity=\"%.2f\"/>\n",
+                        fullRect, smColor, SOLDERMASK_OPACITY));
+            }
+
+            // Silkscreen inside the soldermask. A side ordered without a legend prints none,
+            // whatever silkscreen files it ships. The pcb-silkscreen class marks the group so
+            // a viewer can recolor it when the soldermask color changes.
+            if (ssColor != null) {
+                for (LayerInfo info : silkscreenLayers) {
+                    writer.write(String.format(
+                            "      <g class=\"pcb-silkscreen\" data-stack-layer=\"silkscreen\" " +
+                                    "data-layer-name=\"%s\" fill=\"%s\" stroke=\"%s\" stroke-width=\"0\">\n",
+                            escapeAttr(info.name), ssColor, ssColor));
+                    renderLayerFeaturesRealistic(info.layer.getFeatures(), writer, ssColor,
+                            smColor != null ? smColor : FR4_COLOR);
+                    writer.write("      </g>\n");
+                }
             }
 
             writer.write("    </g>\n");
@@ -815,6 +1130,164 @@ public class MultiLayerSvgRenderer {
     /** Width-only convenience — height is derived from the SVG's aspect ratio. */
     public byte[] renderRealisticSidePng(Job job, boolean topSide, int widthPx) throws IOException {
         return renderRealisticSidePng(job, topSide, widthPx, 0);
+    }
+
+    /**
+     * A rasterised realistic-view PNG together with the geometry needed to map between its
+     * pixels and the board's real-world millimetres. Field semantics mirror delta-gerber's
+     * {@code MultiLayerSVGRenderer.PngWithScale} so app code can treat an ODB++ render and a
+     * Gerber render uniformly.
+     *
+     * <p>The image covers exactly the {@linkplain #minXmm mm rectangle} {@code [minXmm, minYmm,
+     * widthMm, heightMm]} — the realistic view's viewBox, i.e. the board profile plus padding.
+     * Because the PNG is fitted with {@code preserveAspectRatio="xMidYMid meet"}, the board is
+     * scaled uniformly by {@link #pxPerMm} and centred, occupying the pixel rectangle
+     * {@code [contentOffsetXpx, contentOffsetYpx, contentWidthPx, contentHeightPx]}. For an
+     * aspect-matched PNG (the usual single-dimension call) the offsets are 0 and the content
+     * fills the image.
+     *
+     * <p>The {@code mmRect} is in <em>ODB++ board coordinate space</em> (millimetres, Y-up, the
+     * native datum). Image pixels are top-left origin, Y-down; the realistic view always flips Y
+     * and the bottom side additionally mirrors X — so the ODB++ datum {@code (0,0)} is not at a
+     * fixed pixel. Its actual location is precomputed as {@link #originXpx}/{@link #originYpx}:
+     * <pre>
+     *   pxX = originXpx + gxMm * pxPerMm * (mirrored ? -1 : +1);
+     *   pxY = originYpx - gyMm * pxPerMm;   // minus: ODB++ Y-up vs pixel Y-down
+     * </pre>
+     *
+     * <p><b>Units:</b> the mm-rectangle is only truly millimetres when the renderer's
+     * {@link SvgRenderOptions.OutputUnit} is {@code MM}. With the default {@code INCH} output the
+     * rectangle and {@code pxPerMm} are expressed in the viewBox unit (inches). Configure the
+     * renderer with {@code OutputUnit.MM} for mm semantics matching delta-gerber.
+     */
+    public static final class PngWithScale {
+        /** PNG bytes. */
+        public final byte[] png;
+        /** Actual pixel dimensions of the PNG. */
+        public final int widthPx, heightPx;
+        /** The mm rectangle the image covers, in ODB++ board space (Y-up): profile bounds
+         *  plus padding. */
+        public final double minXmm, minYmm, widthMm, heightMm;
+        /** Uniform scale Batik applied (pixels per millimetre). */
+        public final double pxPerMm;
+        /** Pixel rectangle the board content occupies inside the PNG (letterbox-aware). */
+        public final double contentOffsetXpx, contentOffsetYpx, contentWidthPx, contentHeightPx;
+        /** Pixel location of the ODB++ datum (0,0), Y-flip- and mirror-aware. */
+        public final double originXpx, originYpx;
+        /** Which board side this image shows. */
+        public final Side side;
+        /** Whether the X axis was mirrored (bottom shown as the real physical underside). */
+        public final boolean mirrored;
+
+        PngWithScale(byte[] png, int widthPx, int heightPx,
+                     double minXmm, double minYmm, double widthMm, double heightMm,
+                     Side side, boolean mirrored) {
+            this.png = png;
+            this.side = side;
+            this.mirrored = mirrored;
+            this.widthPx = widthPx;
+            this.heightPx = heightPx;
+            this.minXmm = minXmm;
+            this.minYmm = minYmm;
+            this.widthMm = widthMm;
+            this.heightMm = heightMm;
+            // xMidYMid meet: uniform scale is the smaller of the two axis ratios; the
+            // shorter axis is letterboxed (centred) within the PNG.
+            double sx = widthMm  > 0 ? widthPx  / widthMm  : 0;
+            double sy = heightMm > 0 ? heightPx / heightMm : 0;
+            this.pxPerMm = (sx > 0 && sy > 0) ? Math.min(sx, sy) : Math.max(sx, sy);
+            this.contentWidthPx  = widthMm  * pxPerMm;
+            this.contentHeightPx = heightMm * pxPerMm;
+            this.contentOffsetXpx = (widthPx  - contentWidthPx)  / 2.0;
+            this.contentOffsetYpx = (heightPx - contentHeightPx) / 2.0;
+            // Pixel position of the ODB++ datum (0,0). The realistic view always flips Y, so
+            // the image top is board maxY and pixel-Y runs downward from there; the bottom side
+            // additionally mirrors X about the rect's centre.
+            this.originXpx = contentOffsetXpx
+                + (mirrored ? (minXmm + widthMm) : -minXmm) * pxPerMm;
+            this.originYpx = contentOffsetYpx
+                + (minYmm + heightMm) * pxPerMm;
+        }
+
+        /** Millimetres per pixel — convenience inverse of {@link #pxPerMm}. */
+        public double mmPerPx() { return pxPerMm > 0 ? 1.0 / pxPerMm : 0; }
+    }
+
+    /**
+     * Render a realistic side view to PNG and return it together with the px↔mm scale and the
+     * mm rectangle it covers, so a caller can overlay real-world measurements (e.g. a 10 mm grid
+     * behind the board). Same rendering as {@link #renderRealisticSidePng(Job, boolean, int, int)}.
+     *
+     * @param job      the ODB++ job
+     * @param topSide  true for the top view, false for the bottom view
+     * @param widthPx  target width in pixels, or {@code <= 0} to derive from height
+     * @param heightPx target height in pixels, or {@code <= 0} to derive from width
+     * @return a {@link PngWithScale}
+     * @throws IllegalArgumentException if both dimensions are {@code <= 0}
+     * @throws IllegalStateException    if the job has no profile or no renderable layers
+     */
+    public PngWithScale renderRealisticSidePngWithScale(Job job, boolean topSide,
+            int widthPx, int heightPx) throws IOException {
+        if (widthPx <= 0 && heightPx <= 0) {
+            throw new IllegalArgumentException(
+                    "At least one of widthPx/heightPx must be positive");
+        }
+
+        StringWriter svgWriter = new StringWriter();
+        renderRealisticJob(job, topSide, svgWriter);
+        String svg = svgWriter.toString();
+        if (svg.isBlank() || svg.contains("<!-- Empty design -->")) {
+            throw new IllegalStateException(
+                    "Cannot rasterise: realistic " + (topSide ? "top" : "bottom") +
+                            " view produced no content");
+        }
+
+        double[] vb = parseViewBox(svg);
+        // Derive the missing dimension from the viewBox so the PNG's aspect ratio matches the
+        // board's extent. Passing both dimensions explicitly avoids ambiguity in how Batik
+        // resolves a single KEY_WIDTH/KEY_HEIGHT hint, keeping the reported scale exact.
+        if ((widthPx <= 0 || heightPx <= 0) && vb != null && vb[2] > 0 && vb[3] > 0) {
+            double aspect = vb[2] / vb[3];
+            if (widthPx <= 0) {
+                widthPx = (int) Math.max(1, Math.round(heightPx * aspect));
+            }
+            if (heightPx <= 0) {
+                heightPx = (int) Math.max(1, Math.round(widthPx / aspect));
+            }
+        }
+
+        byte[] png = rasterizeSvgToPng(svg, widthPx, heightPx);
+
+        double minXmm  = vb != null ? vb[0] : 0;
+        double minYmm  = vb != null ? vb[1] : 0;
+        double widthMm  = vb != null ? vb[2] : 0;
+        double heightMm = vb != null ? vb[3] : 0;
+        Side side = topSide ? Side.TOP : Side.BOTTOM;
+        boolean mirrored = !topSide; // bottom view is X-mirrored (physical underside)
+        return new PngWithScale(png, widthPx, heightPx,
+                minXmm, minYmm, widthMm, heightMm, side, mirrored);
+    }
+
+    /**
+     * Parse the {@code viewBox="minX minY width height"} of the first {@code <svg>} tag.
+     * Returns {@code null} when absent or malformed.
+     */
+    private static double[] parseViewBox(String svg) {
+        int i = svg.indexOf("viewBox=\"");
+        if (i < 0) return null;
+        int start = i + "viewBox=\"".length();
+        int end = svg.indexOf('"', start);
+        if (end < 0) return null;
+        String[] parts = svg.substring(start, end).trim().split("\\s+");
+        if (parts.length != 4) return null;
+        try {
+            return new double[] {
+                Double.parseDouble(parts[0]), Double.parseDouble(parts[1]),
+                Double.parseDouble(parts[2]), Double.parseDouble(parts[3])
+            };
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /**
@@ -1416,7 +1889,8 @@ public class MultiLayerSvgRenderer {
             writer.write(String.format(Locale.US, "      <path d=\"%s\" fill=\"%s\" fill-rule=\"evenodd\" stroke=\"none\"/>\n",
                     combinedPath.toString().trim(), fillColor));
         } else if (feature instanceof Text text) {
-            if (text.getText() != null && !text.getText().isEmpty()) {
+            // Preview thumbnails skip text: reduced detail, and small text is illegible anyway.
+            if (!previewMode && text.getText() != null && !text.getText().isEmpty()) {
                 double fontSize = baseOptions.toOutputUnit(text.getYsize() > 0 ? text.getYsize() : baseOptions.getDefaultFontSize());
                 double x = baseOptions.toOutputUnit(text.getX());
                 double y = baseOptions.toOutputUnit(text.getY());
