@@ -20,6 +20,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -110,6 +111,86 @@ class ViaInPadTest {
         job.getSteps().get("pcb").getLayersByName().remove("spt");
         BoardSpecification spec = new OdbAnalyzer().analyze(job, "pcb");
         assertNull(spec.hasViaInPad());
+    }
+
+    @Test
+    void naSidePasteCountsForBothSides() {
+        // A paste layer named so it classifies as NA (no side clue) still carries a via-in-pad,
+        // and the side attribution is conservative: the pad matches whether the drill was called
+        // out as top or bottom, so hasViaInPad stays TRUE regardless.
+        Job job = buildJob(/*drillInside*/ true);
+        // Rename the paste layer to a name that yields LayerSide.NA (no top/bot clue).
+        job.getMatrix().getLayers().stream()
+                .filter(l -> "SOLDER_PASTE".equals(l.getType()))
+                .forEach(l -> l.setName("paste"));
+        Map<String, Layer> layers = job.getSteps().get("pcb").getLayersByName();
+        layers.put("paste", layers.remove("spt"));
+
+        BoardSpecification spec = new OdbAnalyzer().analyze(job, "pcb");
+        assertEquals(Boolean.TRUE, spec.hasViaInPad());
+        assertEquals(1, spec.getViaInPadCount());
+        // NA paste is attributed to both sides, so the via reports on both.
+        assertTrue(spec.getViaInPadSide() == BoardSide.BOTH,
+                "NA-side via-in-pad should report on both sides, was " + spec.getViaInPadSide());
+    }
+
+    @Test
+    void analyzerDerivesMinDrillFromHoleSymbolsWithoutToolsFile() {
+        // A drill layer with no tools file, whose holes are flashed hole<d> symbols. The analyzer
+        // must recognise the HOLE family and derive min drill from it (previously it saw null).
+        Matrix matrix = new Matrix();
+        List<MatrixLayer> mls = new ArrayList<>();
+        mls.add(matrixLayer(1, "SIGNAL", "top"));
+        mls.add(matrixLayer(2, "DRILL", "drill"));
+        mls.add(matrixLayer(3, "SIGNAL", "bot"));
+        matrix.setLayers(mls);
+
+        Map<String, Layer> layers = new LinkedHashMap<>();
+        layers.put("top", copperLayer());
+        layers.put("drill", holeSymbolDrillLayer());
+        layers.put("bot", copperLayer());
+
+        Step step = new Step();
+        step.setName("pcb");
+        step.setLayersByName(layers);
+        com.deltaproto.deltaodbpp.model.StepHdr hdr = new com.deltaproto.deltaodbpp.model.StepHdr();
+        hdr.setUnits("MM"); // symbol dims are microns → hole300 = 0.3 mm
+        step.setStepHdr(hdr);
+
+        Map<String, Step> steps = new LinkedHashMap<>();
+        steps.put("pcb", step);
+        Job job = new Job();
+        job.setMatrix(matrix);
+        job.setSteps(steps);
+
+        BoardSpecification spec = new OdbAnalyzer().analyze(job, "pcb");
+        assertTrue(spec.hasDrill());
+        assertNotNull(spec.getMinDrillDiameterMm(), "hole symbols should drive min drill");
+        // holes are hole300 (0.3 mm) and hole500 (0.5 mm) → min 0.3 mm, attributed plated.
+        assertEquals(0.3, spec.getMinDrillDiameterMm(), 1e-9);
+        assertEquals(0.3, spec.getMinPlatedDrillMm(), 1e-9);
+    }
+
+    private static Layer holeSymbolDrillLayer() {
+        Layer layer = new Layer();
+        Features f = new Features();
+        f.setUnits("MM");
+        f.getSymbolTable().put(0, "hole300");     // 0.3 mm plated hole
+        f.getSymbolTable().put(1, "hole500x1x0x0"); // 0.5 mm, full spec form
+        Pad h1 = new Pad();
+        h1.setX(5.0);
+        h1.setY(5.0);
+        h1.setSymbolNumber(0);
+        h1.setPolarity("P");
+        f.getFeatures().add(h1);
+        Pad h2 = new Pad();
+        h2.setX(6.0);
+        h2.setY(6.0);
+        h2.setSymbolNumber(1);
+        h2.setPolarity("P");
+        f.getFeatures().add(h2);
+        layer.setFeatures(f);
+        return layer;
     }
 
     /**

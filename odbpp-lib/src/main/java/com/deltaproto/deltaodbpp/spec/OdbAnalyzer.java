@@ -432,12 +432,21 @@ public class OdbAnalyzer {
     // Via-in-pad collection
     // ------------------------------------------------------------------------
 
+    /**
+     * Collects paste openings as {@link PastePad}s for via-in-pad detection. A paste layer whose
+     * side is unknown ({@link LayerSide#NA}) has its pads attributed to <strong>both</strong> sides:
+     * a hole in such a pad is a via-in-pad regardless of side, so counting both keeps
+     * {@code hasViaInPad} correct while the side report stays conservative rather than guessing top.
+     */
     private static void collectPastePads(Features features, LayerSide side, List<PastePad> out,
                                          double unitToMm) {
         boolean top = side == LayerSide.TOP;
         boolean bottom = side == LayerSide.BOTTOM;
         if (!top && !bottom) {
-            top = true; // a sideless paste layer is assumed top; its pads still count either way
+            // Unknown side: count the pad on both sides so a via-in-pad is never missed and the
+            // side attribution stays conservative (never falsely pins an NA pad to top only).
+            top = true;
+            bottom = true;
         }
         for (Feature f : features.getFeatures()) {
             if (!(f instanceof Pad pad)) {
