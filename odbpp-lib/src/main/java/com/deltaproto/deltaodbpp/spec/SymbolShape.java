@@ -26,8 +26,11 @@ final class SymbolShape {
             Pattern.compile("rect([0-9.]+)x([0-9.]+)xr([0-9.]+)(?:x([1-4]+))?");
     private static final Pattern OVAL = Pattern.compile("oval([0-9.]+)x([0-9.]+)");
     private static final Pattern DONUT = Pattern.compile("donut_r([0-9.]+)x([0-9.]+)");
-    // A round drilled hole symbol, plated or non-plated, e.g. "hole300" or "vrhole250".
-    private static final Pattern HOLE = Pattern.compile("(?:v?r?)?hole([0-9.]+)(?:.*)?");
+    // A round drilled hole symbol, plated or non-plated. The spec form is
+    // hole<d>x<p>x<tp>x<tm> (diameter, plating 0/1, type, mark); the leading diameter is the drill
+    // size and the only field the analyzer measures. An optional v/r prefix (vrhole, rhole) and a
+    // bare "hole300" without the trailing fields are tolerated, so a variety of exports round-trip.
+    private static final Pattern HOLE = Pattern.compile("(?:v?r?)?hole([0-9.]+)(?:x[0-9.]+)*");
 
     final Kind kind;
     final double width;         // mm; diameter for ROUND/SQUARE/DONUT outer
@@ -76,6 +79,11 @@ final class SymbolShape {
             return new SymbolShape(Kind.DONUT,
                     Double.parseDouble(m.group(1)) * unitToMm, 0,
                     Double.parseDouble(m.group(2)) * unitToMm);
+        }
+        m = HOLE.matcher(n);
+        if (m.matches()) {
+            // A drilled hole is a round opening; its leading dimension is the drill diameter.
+            return new SymbolShape(Kind.ROUND, Double.parseDouble(m.group(1)) * unitToMm, 0, 0);
         }
         m = ROUND.matcher(n);
         if (m.matches()) {
