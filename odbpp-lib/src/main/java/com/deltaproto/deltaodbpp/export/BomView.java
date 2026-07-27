@@ -3,6 +3,7 @@ package com.deltaproto.deltaodbpp.export;
 import com.deltaproto.deltaodbpp.model.Bom;
 import com.deltaproto.deltaodbpp.model.BomItem;
 import com.deltaproto.deltaodbpp.model.Component;
+import com.deltaproto.deltaodbpp.model.EdaData;
 import com.deltaproto.deltaodbpp.model.Job;
 import com.deltaproto.deltaodbpp.model.Layer;
 import com.deltaproto.deltaodbpp.model.MirrorType;
@@ -51,6 +52,16 @@ public final class BomView {
         public Double rotation;
         public String mirror;           // N / M
         public String packageName;
+        /**
+         * Component bounding box in the package-local frame (mm), i.e. relative to the
+         * placement origin at {@code xMm,yMm} <em>before</em> rotation/mirror. Sourced from
+         * the EDA package outline. All four are {@code null} when the archive has no EDA
+         * package data (or the outline is degenerate), so consumers must null-check.
+         */
+        public Double bboxXMinMm;
+        public Double bboxYMinMm;
+        public Double bboxXMaxMm;
+        public Double bboxYMaxMm;
     }
 
     public static List<Row> build(Job job) {
@@ -65,6 +76,12 @@ public final class BomView {
         // Coordinates are normalised to mm at parse time (StepParser threads the
         // step's UNITS through to ComponentsParser et al.), so no conversion here.
         LayerSideClassifier classifier = new LayerSideClassifier(job != null ? job.getMatrix() : null);
+
+        // EDA package outlines (bounding boxes), indexed by Component.pkgRef. May be null
+        // for archives that ship no eda/data.
+        List<EdaData.PackageRecord> packages = step.getEdaData() != null
+                ? step.getEdaData().getPackageRecords()
+                : null;
 
         // Group components by their partName (matches BomItem.cpn).
         Map<String, List<Component>> componentsByPart = new LinkedHashMap<>();
@@ -111,7 +128,7 @@ public final class BomView {
                 List<Component> matches = componentsByPart.remove(item.getCpn());
                 if (matches != null) {
                     for (Component c : matches) {
-                        row.refdesList.add(toRefdesEntry(c, sideByRefdes));
+                        row.refdesList.add(toRefdesEntry(c, sideByRefdes, packages));
                     }
                 }
                 // Fall back to BomItem.quantity when component join produced nothing
@@ -140,7 +157,7 @@ public final class BomView {
                 row.description = buildDescriptionFromPrps(first);
             }
             for (Component c : entry.getValue()) {
-                row.refdesList.add(toRefdesEntry(c, sideByRefdes));
+                row.refdesList.add(toRefdesEntry(c, sideByRefdes, packages));
             }
             rows.add(row);
         }
@@ -195,7 +212,8 @@ public final class BomView {
 
     // ---- helpers ----
 
-    private static RefdesEntry toRefdesEntry(Component c, Map<String, String> sideByRefdes) {
+    private static RefdesEntry toRefdesEntry(Component c, Map<String, String> sideByRefdes,
+            List<EdaData.PackageRecord> packages) {
         RefdesEntry r = new RefdesEntry();
         r.refdes = c.getCompName();
         r.side = sideByRefdes.getOrDefault(r.refdes, "");
@@ -204,11 +222,29 @@ public final class BomView {
         r.yMm = c.getY();
         r.rotation = c.getRotation();
         r.mirror = c.getMirror() == MirrorType.MIRRORED ? "M" : "N";
-        // Best-effort: component itself doesn't carry the resolved package string, only the
-        // pkgRef. Leaving the package per-refdes blank is fine — the row-level packageName
-        // already comes from the BOM line.
-        r.packageName = null;
+        // Resolve the EDA package via pkgRef to recover the per-component package name and
+        // its bounding box (outline). Bounds are package-local mm, relative to the placement
+        // origin, before rotation/mirror.
+        EdaData.PackageRecord pkg = lookupPackage(packages, c.getPkgRef());
+        if (pkg != null) {
+            if (pkg.getName() != null && !pkg.getName().isEmpty()) {
+                r.packageName = pkg.getName();
+            }
+            // Skip degenerate/absent outlines (all zero) so callers get null, not a 0x0 box.
+            if (pkg.getXMin() != 0.0 || pkg.getYMin() != 0.0
+                    || pkg.getXMax() != 0.0 || pkg.getYMax() != 0.0) {
+                r.bboxXMinMm = pkg.getXMin();
+                r.bboxYMinMm = pkg.getYMin();
+                r.bboxXMaxMm = pkg.getXMax();
+                r.bboxYMaxMm = pkg.getYMax();
+            }
+        }
         return r;
+    }
+
+    private static EdaData.PackageRecord lookupPackage(List<EdaData.PackageRecord> packages, int pkgRef) {
+        if (packages == null || pkgRef < 0 || pkgRef >= packages.size()) return null;
+        return packages.get(pkgRef);
     }
 
     private static String joinDescriptions(List<String> descriptions) {

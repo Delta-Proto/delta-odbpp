@@ -12,6 +12,7 @@ import org.apache.batik.transcoder.image.PNGTranscoder;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.io.Writer;
@@ -1278,8 +1279,55 @@ public class MultiLayerSvgRenderer {
         double heightMm = (vb != null ? vb[3] : 0) * toMm;
         Side side = topSide ? Side.TOP : Side.BOTTOM;
         boolean mirrored = !topSide; // bottom view is X-mirrored (physical underside)
-        return new PngWithScale(png, widthPx, heightPx,
+        PngWithScale result = new PngWithScale(png, widthPx, heightPx,
                 minXmm, minYmm, widthMm, heightMm, side, mirrored);
+        // Make the PNG self-describing: embed the scale (pHYs) and full mm geometry +
+        // datum-origin + side (tEXt), mirroring delta-gerber so a consumer reads either
+        // library's render through the identical PNG-chunk contract.
+        byte[] withMeta = embedScaleMetadata(png, result.pxPerMm, minXmm, minYmm,
+                widthMm, heightMm, result.contentOffsetXpx, result.contentOffsetYpx,
+                result.originXpx, result.originYpx, side, mirrored);
+        if (withMeta == png) return result; // not a PNG (shouldn't happen) — return as-is
+        return new PngWithScale(withMeta, widthPx, heightPx,
+                minXmm, minYmm, widthMm, heightMm, side, mirrored);
+    }
+
+    /**
+     * Render the realistic top/bottom view as a <em>self-describing transparent PNG</em> and
+     * write it to {@code out}. A drop-in for delta-gerber's realistic-PNG path: the image
+     * carries its px↔mm scale and datum origin in standard PNG chunks written before the first
+     * {@code IDAT}, so a consumer can draw a real-world grid and align overlays without any
+     * ODB-specific handling.
+     *
+     * <p>The rendering (colours, layer stack, silk/mask, board extent) is identical to
+     * {@link #renderRealisticJob(Job, boolean, Writer)}: the PNG covers exactly that view's
+     * {@code viewBox}. The board geometry is opaque; the margin around the outline is fully
+     * transparent (alpha 0).
+     *
+     * <p>Metadata embedded (before {@code IDAT}, matching delta-gerber):
+     * <ol>
+     *   <li>{@code pHYs} — unit = 1 (metre), pixelsPerUnit = {@code round(pxPerMm * 1000)};</li>
+     *   <li>{@code tEXt} {@code side} — {@code "top"} or {@code "bottom"};</li>
+     *   <li>{@code tEXt} {@code pxPerMm} — the px-per-mm ratio as a decimal string;</li>
+     *   <li>{@code tEXt} {@code boardGeometryMm} — compact JSON with {@code mmRect} (== the SVG
+     *       {@code viewBox}), {@code pxPerMm}, {@code originPx} and {@code mirrored}.</li>
+     * </ol>
+     *
+     * @param job     the ODB++ job
+     * @param topSide true for the top view, false for the bottom view (X-mirrored, {@code
+     *                mirrored:true})
+     * @param widthPx target width in pixels; the height follows the board's aspect ratio
+     * @param out     the stream the PNG bytes are written to (not closed by this method)
+     * @throws IllegalArgumentException if {@code widthPx <= 0}
+     * @throws IllegalStateException    if the job has no profile or no renderable layers
+     */
+    public void renderRealisticJobPng(Job job, boolean topSide, int widthPx, OutputStream out)
+            throws IOException {
+        if (widthPx <= 0) {
+            throw new IllegalArgumentException("widthPx must be positive");
+        }
+        PngWithScale r = renderRealisticSidePngWithScale(job, topSide, widthPx, 0);
+        out.write(r.png);
     }
 
     /**
@@ -1367,6 +1415,126 @@ public class MultiLayerSvgRenderer {
         }
         out = out.replace("<use href=\"", "<use xlink:href=\"");
         return out;
+    }
+
+    // ------------------------------------------------------------------
+    // Self-describing PNG metadata (pHYs + tEXt), mirroring delta-gerber
+    // ------------------------------------------------------------------
+
+    /** 8-byte PNG file signature. */
+    private static final byte[] PNG_SIGNATURE =
+            {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+
+    /**
+     * Embed the px↔mm scale into a freshly-encoded PNG so the image is self-describing:
+     * <ul>
+     *   <li>a standard {@code pHYs} chunk recording pixels-per-metre (uniform on both axes,
+     *       unit = 1 metre) — image viewers read this as the image's resolution/DPI;</li>
+     *   <li>{@code tEXt} chunks: {@code side} ("top"/"bottom"), {@code pxPerMm} (the exact
+     *       scale as text), and {@code boardGeometryMm} (a JSON object with the side, mirror
+     *       flag, the board-space mm rectangle the image covers, the letterbox content offset,
+     *       and the pixel location of the ODB++ datum origin), for callers overlaying
+     *       real-world measurements such as a 10 mm grid anchored to the origin.</li>
+     * </ul>
+     * The new chunks replace any existing {@code pHYs} and are spliced in before the first
+     * {@code IDAT} (as the spec requires). Returns the input unchanged if it isn't a PNG. The
+     * JSON layout and chunk ordering match delta-gerber's {@code embedScaleMetadata} so a
+     * consumer parses either library's render identically.
+     */
+    private static byte[] embedScaleMetadata(byte[] png, double pxPerMm,
+            double minXmm, double minYmm, double widthMm, double heightMm,
+            double contentOffsetXpx, double contentOffsetYpx,
+            double originXpx, double originYpx, Side side, boolean mirrored) {
+        if (png == null || png.length < 8 + 25) return png;
+        for (int i = 0; i < PNG_SIGNATURE.length; i++) {
+            if (png[i] != PNG_SIGNATURE[i]) return png; // not a PNG — leave it alone
+        }
+
+        // pHYs: pixels-per-unit X/Y (big-endian, uint32) + unit specifier (1 = metre).
+        long ppm = Math.round(pxPerMm * 1000.0); // px per mm -> px per metre
+        if (ppm < 0) ppm = 0;
+        byte[] phys = new byte[9];
+        writeUInt32(phys, 0, ppm);
+        writeUInt32(phys, 4, ppm);
+        phys[8] = 1;
+
+        String sideStr = side == Side.BOTTOM ? "bottom" : "top";
+        String geometry = String.format(Locale.US,
+                "{\"side\":\"%s\",\"mirrored\":%b,\"pxPerMm\":%.6f,"
+                + "\"mmRect\":[%.6f,%.6f,%.6f,%.6f],"
+                + "\"contentOffsetPx\":[%.3f,%.3f],\"originPx\":[%.3f,%.3f]}",
+                sideStr, mirrored, pxPerMm, minXmm, minYmm, widthMm, heightMm,
+                contentOffsetXpx, contentOffsetYpx, originXpx, originYpx);
+
+        // Walk the chunk stream so we can (a) drop any pHYs Batik already wrote — leaving
+        // two would make readers pick the wrong one — and (b) splice our chunks in just
+        // before the first IDAT, satisfying the spec's "pHYs before IDAT" ordering.
+        ByteArrayOutputStream out = new ByteArrayOutputStream(png.length + 128);
+        out.write(png, 0, 8); // signature
+        int pos = 8;
+        boolean inserted = false;
+        while (pos + 8 <= png.length) {
+            long len = readUInt32(png, pos);
+            int dataStart = pos + 8;
+            int chunkEnd = (int) (dataStart + len + 4); // +4 CRC
+            if (len < 0 || chunkEnd > png.length) break; // malformed — bail, keep original
+            String type = new String(png, pos + 4, 4,
+                    java.nio.charset.StandardCharsets.US_ASCII);
+            if ("pHYs".equals(type)) { pos = chunkEnd; continue; } // drop existing pHYs
+            if (("IDAT".equals(type) || "IEND".equals(type)) && !inserted) {
+                writeChunk(out, "pHYs", phys);
+                writeChunk(out, "tEXt", textChunkData("side", sideStr));
+                writeChunk(out, "tEXt", textChunkData("pxPerMm",
+                        String.format(Locale.US, "%.6f", pxPerMm)));
+                writeChunk(out, "tEXt", textChunkData("boardGeometryMm", geometry));
+                inserted = true;
+            }
+            out.write(png, pos, chunkEnd - pos);
+            pos = chunkEnd;
+        }
+        if (!inserted) return png; // never found IDAT/IEND — leave original untouched
+        return out.toByteArray();
+    }
+
+    private static void writeUInt32(byte[] buf, int off, long v) {
+        buf[off]     = (byte) ((v >>> 24) & 0xFF);
+        buf[off + 1] = (byte) ((v >>> 16) & 0xFF);
+        buf[off + 2] = (byte) ((v >>> 8) & 0xFF);
+        buf[off + 3] = (byte) (v & 0xFF);
+    }
+
+    private static long readUInt32(byte[] buf, int off) {
+        return ((long) (buf[off] & 0xFF) << 24)
+             | ((buf[off + 1] & 0xFF) << 16)
+             | ((buf[off + 2] & 0xFF) << 8)
+             | (buf[off + 3] & 0xFF);
+    }
+
+    /** Latin-1 keyword + NUL separator + Latin-1 text, per the PNG {@code tEXt} format. */
+    private static byte[] textChunkData(String keyword, String text) {
+        byte[] k = keyword.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+        byte[] t = text.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+        byte[] data = new byte[k.length + 1 + t.length];
+        System.arraycopy(k, 0, data, 0, k.length);
+        data[k.length] = 0;
+        System.arraycopy(t, 0, data, k.length + 1, t.length);
+        return data;
+    }
+
+    /** Write a full PNG chunk: length(4) + type(4) + data + CRC32(type+data). */
+    private static void writeChunk(ByteArrayOutputStream out, String type, byte[] data) {
+        byte[] typeBytes = type.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        byte[] len = new byte[4];
+        writeUInt32(len, 0, data.length);
+        out.write(len, 0, 4);
+        out.write(typeBytes, 0, 4);
+        out.write(data, 0, data.length);
+        java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+        crc.update(typeBytes);
+        crc.update(data);
+        byte[] crcBytes = new byte[4];
+        writeUInt32(crcBytes, 0, crc.getValue());
+        out.write(crcBytes, 0, 4);
     }
 
     /**

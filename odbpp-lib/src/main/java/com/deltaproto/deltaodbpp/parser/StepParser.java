@@ -44,7 +44,7 @@ public class StepParser {
         if (Files.exists(edaDir)) {
             Path dataFile = edaDir.resolve("data");
             if (Files.exists(dataFile)) {
-                step.setEdaData(edaDataParser.parse(dataFile));
+                step.setEdaData(edaDataParser.parse(dataFile, mmScale));
             }
         }
 

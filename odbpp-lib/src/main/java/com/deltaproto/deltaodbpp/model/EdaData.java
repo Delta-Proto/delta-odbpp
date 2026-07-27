@@ -42,6 +42,16 @@ public class EdaData {
         private List<PinRecord> pinRecords;
         private Map<String, PinRecord> pinRecordsByName;
         private Map<String, String> attributes;
+
+        /** Bounding-box width in the record's units (mm after parsing). */
+        public double getWidth() {
+            return xMax - xMin;
+        }
+
+        /** Bounding-box height in the record's units (mm after parsing). */
+        public double getHeight() {
+            return yMax - yMin;
+        }
     }
 
     @Data
