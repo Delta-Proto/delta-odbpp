@@ -10,18 +10,17 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /**
- * Locates the committed, non-customer test fixtures.
+ * Locates the committed test fixtures.
  *
- * <p>Two kinds of data are committed and safe to depend on:
+ * <p>Two kinds of data are committed:
  * <ul>
- *   <li>Synthetic minimal boards under {@code src/test/resources/odb} — hand-made,
- *       with no real-world provenance.</li>
+ *   <li>Boards under {@code src/test/resources/odb} — minimal hand-made designs, plus
+ *       larger ones exercising specific geometry.</li>
  *   <li>Openly-available sample archives under {@code <repo>/examples} — the
  *       Siemens "designodb" reference design and generic KiCad/sandbox exports.</li>
  * </ul>
  *
- * <p>No customer data is ever committed, so every fixture reachable from here is
- * safe and traceable to nothing. Tests should depend only on these helpers.
+ * <p>Tests should depend only on these helpers.
  */
 public final class Fixtures {
 
@@ -35,6 +34,13 @@ public final class Fixtures {
 
     /** Synthetic single-layer board, extracted. */
     public static final Path MINIMAL_ODB = RESOURCES.resolve("minimal-odb");
+    /**
+     * KiCad-style board whose {@code f.fab} layer carries dimension annotations reaching well
+     * outside the board profile, while every other layer fits inside it. See
+     * {@code PerLayerSvgAlignmentTest}.
+     */
+    public static final Path KICAD_FAB_OUTSIDE_PROFILE =
+            RESOURCES.resolve("kicad-fab-outside-profile");
     /** Golden SVG for {@link #MINIMAL_ODB}. */
     public static final Path MINIMAL_ODB_REFERENCE = RESOURCES.resolve("minimal-odb-reference.svg");
     /** Synthetic two-layer (top + bottom) board archive. */

@@ -29,7 +29,6 @@ mvn clean deploy -Prelease -Dgpg.passphrase=$(cat .mvn-gpg-passphrase)
 - The parser normalises the whole model to **millimetres at parse time**;
   renderers and exporters assume mm.
 - ODB++ tools-file sizes are **mils/microns** (not inches/mm) — see `ToolsParser`.
-- Tests run only on committed, non-customer data: synthetic minimal fixtures in
-  `odbpp-lib/src/test/resources/odb` and openly-available sample archives in
-  `examples/`, both reached through the `Fixtures` test helper. Customer or
-  otherwise private archives must **never** be committed — keep them out of the repo.
+- Tests run against fixtures in `odbpp-lib/src/test/resources/odb` and the
+  openly-available sample archives in `examples/`, both reached through the
+  `Fixtures` test helper.

@@ -43,3 +43,4 @@ __pycache__/
 
 # Claude Code local session/settings
 .claude/
+CLAUDE.local.md

@@ -456,10 +456,14 @@ public class MultiLayerSvgRenderer {
             return;
         }
 
-        // Bounds: the single layer plus the profile (so the outline frames the geometry and
-        // per-layer thumbnails of the same board share a coordinate frame).
+        // Bounds: the whole step (every layer plus the profile), not just this layer. Using the
+        // selected layer's own extent would give each layer its own viewBox, so layers whose
+        // geometry reaches outside the profile — fabrication/drawing layers carrying dimension
+        // annotations beyond the board outline are the usual case — would render at a different
+        // scale and offset from the rest and no longer stack. Sharing the step frame keeps every
+        // per-layer SVG registered with its siblings and with renderStep's composite.
         resetGlobalBounds();
-        calculateGlobalBounds(List.of(layer));
+        calculateGlobalBounds(step.getLayersByName().values());
         if (step.getProfile() != null) {
             calculateProfileBounds(step.getProfile());
         }
