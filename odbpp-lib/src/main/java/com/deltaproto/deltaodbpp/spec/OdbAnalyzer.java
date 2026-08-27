@@ -8,6 +8,7 @@ import com.deltaproto.deltaodbpp.model.Features;
 import com.deltaproto.deltaodbpp.model.Job;
 import com.deltaproto.deltaodbpp.model.Layer;
 import com.deltaproto.deltaodbpp.model.Line;
+import com.deltaproto.deltaodbpp.model.Matrix;
 import com.deltaproto.deltaodbpp.model.MatrixLayer;
 import com.deltaproto.deltaodbpp.model.Pad;
 import com.deltaproto.deltaodbpp.model.Step;
@@ -75,7 +76,7 @@ public class OdbAnalyzer {
             return new BoardSpecification(step == null ? null : step.getName(), null, null, null,
                     null, null, null, null, null, BoardSide.NONE, BoardSide.NONE, BoardSide.NONE,
                     false, false, false, ViaInPadResult.empty(), false, null, null, null, null,
-                    null, List.of());
+                    null, List.of(), List.of());
         }
 
         LayerModel model = new LayerModel(job);
@@ -111,6 +112,8 @@ public class OdbAnalyzer {
                     .matrixRow(ml.getRow())
                     .type(ml.getType())
                     .context(ml.getContext())
+                    .startName(ml.getStartName())
+                    .endName(ml.getEndName())
                     .side(side)
                     .hasGeometry(geometry)
                     .bounds(geometry ? featureBounds(features) : null);
@@ -169,7 +172,8 @@ public class OdbAnalyzer {
         Integer compBottom = compCounts == null ? null : compCounts[1];
 
         Integer bomLines = bomLineCount(step);
-        Double thickness = totalThicknessMm(job, step);
+        List<StackupLayer> stackup = StackupResolver.resolve(job, step);
+        Double thickness = totalThicknessMm(job, step, stackup);
         Boolean impedance = impedanceControl(step);
 
         return new BoardSpecification(
@@ -195,7 +199,8 @@ public class OdbAnalyzer {
                 compTop,
                 compBottom,
                 bomLines,
-                layers);
+                layers,
+                stackup);
     }
 
     // ------------------------------------------------------------------------
@@ -542,12 +547,39 @@ public class OdbAnalyzer {
     }
 
     /**
-     * Total finished board thickness in mm. Preferred source is a drill/rout tools file's THICKNESS
-     * (already mm); a stackup file, when present, confirms the design is stack-defined but the
-     * parsed stackup model carries no per-layer thickness, so it is not summed here. Null when no
-     * thickness is available.
+     * Total finished board thickness in mm, from the best source the archive offers, in order:
+     *
+     * <ol>
+     *   <li>{@code matrix/stackup.xml}'s own target thickness — the number the design asked the
+     *       fabricator to build to, and the only one stated as a board thickness rather than
+     *       inferred. Rare: most writers, Altium among them, ship no stackup file;</li>
+     *   <li>the {@code .board_thickness} attribute, which is what archives in the wild actually
+     *       carry, and which the spec names as the source the obsolete tools THICKNESS is derived
+     *       from;</li>
+     *   <li>the sum of the resolved stack, but only when <em>every</em> entry's thickness came from
+     *       the archive. A sum that mixes stated thicknesses with this library's typicals would look
+     *       measured and would not be, so one estimated entry disqualifies it (see
+     *       {@link StackupResolver#summedThicknessMm(List)});</li>
+     *   <li>a drill/rout tools file's THICKNESS, already in mm.</li>
+     * </ol>
+     *
+     * <p>Null when the archive answers none of the four.
      */
-    private static Double totalThicknessMm(Job job, Step step) {
+    private static Double totalThicknessMm(Job job, Step step, List<StackupLayer> stackup) {
+        if (job != null) {
+            Double stated = StackupResolver.statedThicknessMm(job.getStackup());
+            if (stated != null && stated > 0) {
+                return stated;
+            }
+        }
+        Double declared = StackupResolver.boardThicknessMm(job, step);
+        if (declared != null && declared > 0) {
+            return declared;
+        }
+        Double summed = StackupResolver.summedThicknessMm(stackup);
+        if (summed != null && summed > 0) {
+            return summed;
+        }
         if (step.getLayersByName() != null) {
             for (Layer layer : step.getLayersByName().values()) {
                 if (layer.getTools() != null && layer.getTools().getThickness() > 0) {
@@ -584,7 +616,7 @@ public class OdbAnalyzer {
      * package does not depend on {@code export/}. The first copper layer is TOP, the last BOTTOM,
      * the rest INNER; non-copper board layers take their side from name, then from row position.
      */
-    private static final class LayerModel {
+    static final class LayerModel {
         final List<MatrixLayer> boardOrdered = new ArrayList<>();
         final Map<String, LayerSide> sideByName = new LinkedHashMap<>();
         int copperCount = 0;
@@ -592,8 +624,12 @@ public class OdbAnalyzer {
         private int lastCopperRow = Integer.MIN_VALUE;
 
         LayerModel(Job job) {
-            List<MatrixLayer> all = job.getMatrix() != null && job.getMatrix().getLayers() != null
-                    ? job.getMatrix().getLayers() : List.of();
+            this(job == null ? null : job.getMatrix());
+        }
+
+        LayerModel(Matrix matrix) {
+            List<MatrixLayer> all = matrix != null && matrix.getLayers() != null
+                    ? matrix.getLayers() : List.of();
             List<MatrixLayer> sorted = new ArrayList<>(all);
             sorted.sort(Comparator.comparingInt(MatrixLayer::getRow));
 

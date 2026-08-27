@@ -1,0 +1,8 @@
+UNITS=MM
+.out_polarity = positive
+.comment =
+.layer_hdi_type = buildup
+.layer_dielectric = 0.0994
+.loss_tangent = 0.013
+.dielectric_constant = 4.3
+.comment = PP-1080

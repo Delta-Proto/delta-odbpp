@@ -2,27 +2,30 @@ package com.deltaproto.deltaodbpp.export;
 
 import com.deltaproto.deltaodbpp.model.Job;
 import com.deltaproto.deltaodbpp.model.Matrix;
-import com.deltaproto.deltaodbpp.model.MatrixLayer;
+import com.deltaproto.deltaodbpp.spec.StackupLayer;
+import com.deltaproto.deltaodbpp.spec.StackupResolver;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
 
 /**
  * Builds a simplified vertical cross-section view of a board's layer stack,
  * suitable for rendering as a JSON payload to the viewer UI.
  *
- * <p>Real stackup.xml files carry thicknesses, dielectric constants and loss
- * tangents. Many archives (some Altium exports, for instance) omit that
- * file entirely — the matrix still lists the layers and their
- * dielectric material name, but not their physical properties. This view fills
- * in industry-typical defaults when the real values aren't present, so the UI
- * can always draw a meaningful cross-section.
+ * <p>{@link StackupResolver} supplies the numbers, from a stackup.xml when the
+ * archive has one and from the per-layer attrlist files when it does not — which
+ * is the usual case, most writers shipping no stackup.xml at all. Where neither
+ * answers, an industry typical stands in, so the UI can always draw a meaningful
+ * cross-section.
  *
  * <p>The resulting list is ordered by matrix row (top → bottom of the board).
  * Layers that don't contribute to the physical stack (DRILL, ROUT, DOCUMENT,
  * COMPONENT) are skipped.
+ *
+ * <p>This is the JSON projection of {@link StackupLayer}; a caller that needs to
+ * know which values are the archive's own and which are typicals should use
+ * {@link com.deltaproto.deltaodbpp.spec.BoardSpecification#getStackup()}, whose
+ * entries flag that per value rather than only for thickness.
  */
 public final class StackupView {
 
@@ -34,13 +37,21 @@ public final class StackupView {
         public String type;                     // SIGNAL / DIELECTRIC / SOLDER_MASK / …
         public String side;                     // TOP / BOTTOM / INNER / NEITHER
         public double thicknessMm;
+        /**
+         * Thickness in picometres, or null when it could not be determined. 1 mil is exactly
+         * 25 400 000 pm and 1 µin exactly 25 400 pm, so both metric and imperial nominal
+         * thicknesses land on whole picometres and sums of them stay exact — which
+         * {@link #thicknessMm} cannot promise.
+         */
+        public Long thicknessPm;
         public String material;                 // e.g. "Copper", "PP-006", "Solder Resist"
         public Double dielectricConstant;       // null if not applicable
         public Double lossTangent;              // null if not applicable
         public Double copperWeightOz;           // null if not a conductor
         public boolean conductor;
         public boolean dielectric;
-        public boolean estimated;               // true when thickness came from defaults
+        /** True when {@link #thicknessMm} is not a value read from the archive. */
+        public boolean estimated;
     }
 
     /**
@@ -49,40 +60,16 @@ public final class StackupView {
      */
     public static List<Entry> build(Job job) {
         if (job == null || job.getMatrix() == null) return List.of();
-        return build(job.getMatrix());
+        return toEntries(StackupResolver.resolve(job));
     }
 
+    /**
+     * Build from a matrix alone. Without a job there is no {@code stackup.xml} to read, so every
+     * physical value is an industry typical; prefer {@link #build(Job)} when a job is at hand.
+     */
     public static List<Entry> build(Matrix matrix) {
         if (matrix == null || matrix.getLayers() == null) return List.of();
-
-        LayerSideClassifier classifier = new LayerSideClassifier(matrix);
-
-        List<MatrixLayer> sorted = new ArrayList<>(matrix.getLayers());
-        sorted.sort(Comparator.comparingInt(MatrixLayer::getRow));
-
-        // Count outer vs inner conductors so we can assign typical copper weights.
-        int firstConductorRow = Integer.MAX_VALUE;
-        int lastConductorRow = Integer.MIN_VALUE;
-        for (MatrixLayer ml : sorted) {
-            if (isConductor(ml)) {
-                firstConductorRow = Math.min(firstConductorRow, ml.getRow());
-                lastConductorRow = Math.max(lastConductorRow, ml.getRow());
-            }
-        }
-
-        List<Entry> result = new ArrayList<>();
-        for (MatrixLayer ml : sorted) {
-            if (skipInStackup(ml)) continue;
-            Entry e = new Entry();
-            e.name = ml.getName();
-            e.type = upper(ml.getType());
-            e.side = classifier.sideOf(ml.getName()).name();
-            e.conductor = isConductor(ml);
-            e.dielectric = "DIELECTRIC".equals(e.type);
-            populateDefaults(e, ml, firstConductorRow, lastConductorRow);
-            result.add(e);
-        }
-        return result;
+        return toEntries(StackupResolver.resolve(matrix, null));
     }
 
     /** Sum of thicknesses (convenience for UI footer / test assertions). */
@@ -94,68 +81,37 @@ public final class StackupView {
 
     // ---- internals ----
 
-    private static boolean skipInStackup(MatrixLayer ml) {
-        String t = upper(ml.getType());
-        return "DRILL".equals(t) || "ROUT".equals(t)
-                || "DOCUMENT".equals(t) || "COMPONENT".equals(t);
+    private static List<Entry> toEntries(List<StackupLayer> stack) {
+        List<Entry> result = new ArrayList<>(stack.size());
+        for (StackupLayer l : stack) {
+            Entry e = new Entry();
+            e.name = l.getName();
+            e.type = l.getFunction();
+            e.side = side(l);
+            e.thicknessMm = l.getThicknessMm() == null ? 0.0 : l.getThicknessMm();
+            e.thicknessPm = l.getThicknessPm();
+            e.material = l.getMaterial() == null ? "" : l.getMaterial();
+            e.dielectricConstant = l.getDielectricConstant();
+            e.lossTangent = l.getLossTangent();
+            e.copperWeightOz = l.getCopperWeightOz();
+            e.conductor = l.isConductor();
+            e.dielectric = l.isDielectric();
+            e.estimated = !l.isThicknessMeasured();
+            result.add(e);
+        }
+        return result;
     }
 
-    private static boolean isConductor(MatrixLayer ml) {
-        String t = upper(ml.getType());
-        return "SIGNAL".equals(t) || "POWER_GROUND".equals(t) || "MIXED".equals(t);
-    }
-
-    private static String upper(String s) {
-        return s == null ? "" : s.toUpperCase(Locale.ROOT);
-    }
-
-    /** Fill in thickness/material/dk/df with either parsed values or industry typicals. */
-    private static void populateDefaults(Entry e, MatrixLayer ml, int firstConductorRow, int lastConductorRow) {
-        e.estimated = true; // flip to false if we ever add real data sources
-        switch (e.type) {
-            case "SIGNAL":
-            case "POWER_GROUND":
-            case "MIXED": {
-                boolean outer = ml.getRow() == firstConductorRow || ml.getRow() == lastConductorRow;
-                // Typical: 1 oz outers, 0.5 oz inners.
-                e.copperWeightOz = outer ? 1.0 : 0.5;
-                e.thicknessMm = outer ? 0.035 : 0.018;
-                e.material = "Copper";
-                break;
-            }
-            case "DIELECTRIC": {
-                String dtype = upper(ml.getDielectricType());
-                String dname = ml.getDielectricName();
-                e.material = (dname != null && !dname.isEmpty()) ? dname : "Prepreg";
-                // Core is typically thicker than a single prepreg ply.
-                e.thicknessMm = "CORE".equals(dtype) ? 0.2 : 0.1;
-                // FR-4 typicals; a real stackup.xml would override these.
-                e.dielectricConstant = 4.3;
-                e.lossTangent = 0.02;
-                break;
-            }
-            case "SOLDER_MASK":
-                e.thicknessMm = 0.015;
-                e.material = "Solder Resist";
-                e.dielectricConstant = 3.5;
-                e.lossTangent = 0.025;
-                break;
-            case "SILK_SCREEN":
-                e.thicknessMm = 0.005;
-                e.material = "Epoxy Ink";
-                break;
-            case "SOLDER_PASTE":
-                e.thicknessMm = 0.005;
-                e.material = "SnPb/SAC";
-                break;
-            case "CONDUCTIVE_PASTE":
-                e.thicknessMm = 0.005;
-                e.material = "Conductive Paste";
-                break;
-            default:
-                e.thicknessMm = 0.0;
-                e.material = "";
-                break;
+    /**
+     * The view's own side vocabulary. The analyzer calls "not applicable" {@code NA}; this view has
+     * always called it {@code NEITHER}, and the UI reads that name.
+     */
+    private static String side(StackupLayer layer) {
+        switch (layer.getSide()) {
+            case TOP: return LayerSide.TOP.name();
+            case BOTTOM: return LayerSide.BOTTOM.name();
+            case INNER: return LayerSide.INNER.name();
+            default: return LayerSide.NEITHER.name();
         }
     }
 }

@@ -1,0 +1,7 @@
+UNITS=MM
+.out_polarity = positive
+.comment =
+.layer_dielectric = 0.025
+.loss_tangent = 0.028
+.dielectric_constant = 3.9
+.comment = Solder Resist

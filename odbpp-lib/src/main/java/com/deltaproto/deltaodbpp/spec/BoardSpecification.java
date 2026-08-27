@@ -43,6 +43,7 @@ public final class BoardSpecification {
     private final Integer componentCountBottom;
     private final Integer bomLineCount;
     private final List<AnalyzedLayer> layers;
+    private final List<StackupLayer> stackup;
 
     BoardSpecification(String stepName, Double sizeXMm, Double sizeYMm, Bounds bounds,
                        Integer copperLayerCount, Double minTrackWidthUm, Double minDrillDiameterMm,
@@ -52,7 +53,8 @@ public final class BoardSpecification {
                        ViaInPadResult viaInPad, boolean viaInPadDetermined,
                        Double totalThicknessMm, Boolean impedanceControl,
                        Integer componentCountTop, Integer componentCountBottom,
-                       Integer bomLineCount, List<AnalyzedLayer> layers) {
+                       Integer bomLineCount, List<AnalyzedLayer> layers,
+                       List<StackupLayer> stackup) {
         this.stepName = stepName;
         this.sizeXMm = sizeXMm;
         this.sizeYMm = sizeYMm;
@@ -76,6 +78,7 @@ public final class BoardSpecification {
         this.componentCountBottom = componentCountBottom;
         this.bomLineCount = bomLineCount;
         this.layers = List.copyOf(layers);
+        this.stackup = List.copyOf(stackup);
     }
 
     /** The name of the step that was analyzed. */
@@ -183,7 +186,13 @@ public final class BoardSpecification {
         return viaInPadDetermined ? viaInPad : null;
     }
 
-    /** Total finished board thickness in mm from the stackup/tools, or null when not present. */
+    /**
+     * Total finished board thickness in mm, or null when the archive states none.
+     *
+     * <p>Taken from {@code matrix/stackup.xml}'s own target thickness when it has one, else from the
+     * sum of {@link #getStackup()} when every entry's thickness came from the archive, else from a
+     * drill/rout tools file's THICKNESS. It is never a sum of this library's typicals.
+     */
     public Double getTotalThicknessMm() {
         return totalThicknessMm;
     }
@@ -214,6 +223,25 @@ public final class BoardSpecification {
     /** Every analyzed matrix layer, in matrix row order. */
     public List<AnalyzedLayer> getLayers() {
         return layers;
+    }
+
+    /**
+     * The board's physical stack — what it is made of, in build order from the top of the board down,
+     * dielectrics included. Empty when the archive has no matrix.
+     *
+     * <p>This is the companion to {@link #getLayers()}, not a filtered view of it: {@link #getLayers()}
+     * is every matrix layer with the artwork on it measured, while this is the physical build, so it
+     * drops the layers that are only instructions (DRILL, ROUT, DOCUMENT, COMPONENT) and keeps the
+     * ones that carry no artwork at all (the dielectrics).
+     *
+     * <p>{@link StackupLayer#getOrdinal()} is dense and starts at 0, so the list can be persisted row
+     * for row. The physical values come from {@code matrix/stackup.xml} when the archive ships one
+     * and from the per-layer {@code attrlist} files when it does not, which is the usual case; where
+     * neither answers, an industry typical stands in. Every value is flagged as measured or
+     * estimated individually — see {@link StackupLayer}.
+     */
+    public List<StackupLayer> getStackup() {
+        return stackup;
     }
 
     @Override

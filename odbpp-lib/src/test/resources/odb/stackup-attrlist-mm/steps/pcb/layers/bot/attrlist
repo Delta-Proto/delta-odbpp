@@ -1,0 +1,5 @@
+UNITS=MM
+.out_polarity = positive
+.comment =
+.layer_dielectric = 0.0994
+.copper_weight = 1.42851959

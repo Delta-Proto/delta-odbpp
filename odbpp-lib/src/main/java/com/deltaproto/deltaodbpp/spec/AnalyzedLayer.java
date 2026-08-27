@@ -16,6 +16,8 @@ public final class AnalyzedLayer {
     private final Integer matrixRow;
     private final String type;
     private final String context;
+    private final String startName;
+    private final String endName;
     private final LayerSide side;
     private final Bounds bounds;
     private final Double minTrackWidthUm;
@@ -27,6 +29,8 @@ public final class AnalyzedLayer {
         this.matrixRow = b.matrixRow;
         this.type = b.type;
         this.context = b.context;
+        this.startName = b.startName;
+        this.endName = b.endName;
         this.side = b.side == null ? LayerSide.NA : b.side;
         this.bounds = b.bounds;
         this.minTrackWidthUm = b.minTrackWidthUm;
@@ -56,6 +60,24 @@ public final class AnalyzedLayer {
     /** ODB++ matrix layer CONTEXT (usually BOARD; also MISC / DOCUMENT), or null. */
     public String getContext() {
         return context;
+    }
+
+    /**
+     * For a DRILL or ROUT layer, the layer its span starts at ({@code START_NAME} in the matrix) — a
+     * reference to another layer by name. Null on a through-hole layer, which states no span, and on
+     * every layer that is not a drill or rout.
+     *
+     * <p>With {@link #getEndName()} this is what makes a drill blind or buried: a span from the
+     * first copper layer to the last is a through-hole, one touching exactly one outer copper layer
+     * is blind, and one touching neither is buried.
+     */
+    public String getStartName() {
+        return startName;
+    }
+
+    /** The layer a DRILL or ROUT span ends at ({@code END_NAME}); null when it states none. */
+    public String getEndName() {
+        return endName;
     }
 
     /** Inferred physical side — never null ({@link LayerSide#NA} when not determinable). */
@@ -94,6 +116,8 @@ public final class AnalyzedLayer {
         private Integer matrixRow;
         private String type;
         private String context;
+        private String startName;
+        private String endName;
         private LayerSide side;
         private Bounds bounds;
         private Double minTrackWidthUm;
@@ -117,6 +141,22 @@ public final class AnalyzedLayer {
         public Builder context(String context) {
             this.context = context;
             return this;
+        }
+
+        /** Blank is stored as null: the matrix writes an empty START_NAME for a through-hole. */
+        public Builder startName(String startName) {
+            this.startName = blankToNull(startName);
+            return this;
+        }
+
+        /** Blank is stored as null: the matrix writes an empty END_NAME for a through-hole. */
+        public Builder endName(String endName) {
+            this.endName = blankToNull(endName);
+            return this;
+        }
+
+        private static String blankToNull(String s) {
+            return s == null || s.isBlank() ? null : s;
         }
 
         public Builder side(LayerSide side) {

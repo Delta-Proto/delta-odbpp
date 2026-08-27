@@ -1,0 +1,8 @@
+UNITS=MM
+.out_polarity = positive
+.comment =
+.layer_hdi_type = buildup
+.layer_dielectric = 1.2
+.loss_tangent = 0
+.dielectric_constant = 4.5
+.comment = FR4-CORE

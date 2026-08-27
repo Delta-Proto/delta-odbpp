@@ -41,6 +41,21 @@ public final class Fixtures {
      */
     public static final Path KICAD_FAB_OUTSIDE_PROFILE =
             RESOURCES.resolve("kicad-fab-outside-profile");
+    /**
+     * Metric board whose stackup lives where real archives keep it: per-layer {@code attrlist}
+     * files carrying {@code .layer_dielectric}, {@code .dielectric_constant}, {@code .loss_tangent}
+     * and the laminate name, plus {@code .board_thickness} on the product model. Includes the
+     * awkward cases — an untyped DIELECTRIC row, a {@code .loss_tangent} of 0, the adjacent
+     * dielectric's thickness written onto copper layers, and the unset sentinel on silk and paste.
+     */
+    public static final Path STACKUP_ATTRLIST_MM = RESOURCES.resolve("stackup-attrlist-mm");
+    /**
+     * Board whose {@code .board_thickness} follows the spec's {@code MIL_MICRON} rule literally
+     * (1570 microns under {@code UNITS=MM}) rather than the base-unit form every observed archive
+     * writes. See {@code StackupResolver} on how the two are told apart.
+     */
+    public static final Path STACKUP_BOARD_THICKNESS_MICRON =
+            RESOURCES.resolve("stackup-board-thickness-micron");
     /** Golden SVG for {@link #MINIMAL_ODB}. */
     public static final Path MINIMAL_ODB_REFERENCE = RESOURCES.resolve("minimal-odb-reference.svg");
     /** Synthetic two-layer (top + bottom) board archive. */

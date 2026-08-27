@@ -1,0 +1,4 @@
+UNITS=MM
+.out_polarity = positive
+.comment =
+.layer_dielectric = 0.00254
