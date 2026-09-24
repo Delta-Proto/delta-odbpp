@@ -3,6 +3,7 @@ package com.deltaproto.deltaodbpp.app;
 import com.deltaproto.deltaodbpp.OdbArchiveExtractor;
 import com.deltaproto.deltaodbpp.export.BomView;
 import com.deltaproto.deltaodbpp.export.MultiLayerSvgRenderer;
+import com.deltaproto.deltaodbpp.export.SoldermaskColor;
 import com.deltaproto.deltaodbpp.export.StackupView;
 import com.deltaproto.deltaodbpp.export.SvgRenderOptions;
 import com.deltaproto.deltaodbpp.model.Job;
@@ -16,10 +17,12 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -50,8 +53,34 @@ public class OdbViewController {
     private final OdbArchiveExtractor extractor = new OdbArchiveExtractor();
     private final OdbParser parser = new OdbParser();
 
+    /**
+     * The library version as Maven filtered it into {@code version.properties} at build time, or
+     * {@code null} when that file is missing or unfiltered (an IDE running straight from source,
+     * say). The page shows it in its header and hides the badge when there is nothing honest to
+     * show. Mirrors delta-gerber's {@code GerberViewerServer.getVersion()}.
+     */
+    private static final String VERSION = readVersion();
+
+    public static String getVersion() {
+        return VERSION;
+    }
+
+    private static String readVersion() {
+        try (InputStream is = OdbViewController.class.getResourceAsStream("/version.properties")) {
+            if (is == null) return null;
+            Properties properties = new Properties();
+            properties.load(is);
+            String version = properties.getProperty("version", "").trim();
+            return version.isEmpty() || version.startsWith("${") ? null : version;
+        } catch (IOException e) {
+            logger.warn("Failed to read version.properties from classpath", e);
+            return null;
+        }
+    }
+
     @GetMapping("/")
-    public String index() {
+    public String index(Model model) {
+        model.addAttribute("appVersion", VERSION == null ? "" : VERSION);
         return "index";
     }
 
@@ -161,6 +190,8 @@ public class OdbViewController {
      * @param side   "top" or "bottom"
      * @param width  target width in pixels (0..4000, 0 = derive from height)
      * @param height target height in pixels (0..4000, 0 = derive from width)
+     * @param soldermask soldermask colour name ({@link SoldermaskColor}); unknown or absent
+     *                   falls back to the default green, as in the gerber viewer
      */
     @PostMapping(value = "/api/odbpp/thumbnail", produces = MediaType.IMAGE_PNG_VALUE)
     @ResponseBody
@@ -168,7 +199,8 @@ public class OdbViewController {
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "side", defaultValue = "top") String side,
             @RequestParam(value = "width", defaultValue = "800") int width,
-            @RequestParam(value = "height", defaultValue = "0") int height) {
+            @RequestParam(value = "height", defaultValue = "0") int height,
+            @RequestParam(value = "soldermask", required = false) String soldermask) {
 
         if (file.isEmpty()) {
             return ResponseEntity.badRequest()
@@ -198,7 +230,8 @@ public class OdbViewController {
 
             SvgRenderOptions options = new SvgRenderOptions()
                     .withOutputUnit(SvgRenderOptions.OutputUnit.MM);
-            MultiLayerSvgRenderer renderer = new MultiLayerSvgRenderer(options);
+            MultiLayerSvgRenderer renderer = new MultiLayerSvgRenderer(options)
+                    .setSoldermaskColor(SoldermaskColor.fromString(soldermask));
             byte[] png = renderer.renderRealisticSidePng(job, topSide, clampedWidth, clampedHeight);
 
             long elapsed = System.currentTimeMillis() - startTime;

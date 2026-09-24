@@ -2,11 +2,15 @@ package com.deltaproto.deltaodbpp.export;
 
 import com.deltaproto.deltaodbpp.model.Job;
 import com.deltaproto.deltaodbpp.model.Matrix;
+import com.deltaproto.deltaodbpp.model.MatrixLayer;
 import com.deltaproto.deltaodbpp.spec.StackupLayer;
 import com.deltaproto.deltaodbpp.spec.StackupResolver;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 /**
  * Builds a simplified vertical cross-section view of a board's layer stack,
@@ -45,6 +49,8 @@ public final class StackupView {
          */
         public Long thicknessPm;
         public String material;                 // e.g. "Copper", "PP-006", "Solder Resist"
+        /** Matrix {@code DIELECTRIC_TYPE} — PREPREG / CORE / … — or null when not a dielectric or unstated. */
+        public String dielectricType;
         public Double dielectricConstant;       // null if not applicable
         public Double lossTangent;              // null if not applicable
         public Double copperWeightOz;           // null if not a conductor
@@ -60,7 +66,7 @@ public final class StackupView {
      */
     public static List<Entry> build(Job job) {
         if (job == null || job.getMatrix() == null) return List.of();
-        return toEntries(StackupResolver.resolve(job));
+        return toEntries(StackupResolver.resolve(job), job.getMatrix());
     }
 
     /**
@@ -69,7 +75,7 @@ public final class StackupView {
      */
     public static List<Entry> build(Matrix matrix) {
         if (matrix == null || matrix.getLayers() == null) return List.of();
-        return toEntries(StackupResolver.resolve(matrix, null));
+        return toEntries(StackupResolver.resolve(matrix, null), matrix);
     }
 
     /** Sum of thicknesses (convenience for UI footer / test assertions). */
@@ -81,7 +87,15 @@ public final class StackupView {
 
     // ---- internals ----
 
-    private static List<Entry> toEntries(List<StackupLayer> stack) {
+    private static List<Entry> toEntries(List<StackupLayer> stack, Matrix matrix) {
+        Map<String, String> dielectricTypes = new HashMap<>();
+        if (matrix.getLayers() != null) {
+            for (MatrixLayer ml : matrix.getLayers()) {
+                if (ml.getName() != null && ml.getDielectricType() != null && !ml.getDielectricType().isBlank()) {
+                    dielectricTypes.put(ml.getName().toLowerCase(Locale.ROOT), ml.getDielectricType());
+                }
+            }
+        }
         List<Entry> result = new ArrayList<>(stack.size());
         for (StackupLayer l : stack) {
             Entry e = new Entry();
@@ -91,6 +105,8 @@ public final class StackupView {
             e.thicknessMm = l.getThicknessMm() == null ? 0.0 : l.getThicknessMm();
             e.thicknessPm = l.getThicknessPm();
             e.material = l.getMaterial() == null ? "" : l.getMaterial();
+            e.dielectricType = l.isDielectric() && l.getName() != null
+                    ? dielectricTypes.get(l.getName().toLowerCase(Locale.ROOT)) : null;
             e.dielectricConstant = l.getDielectricConstant();
             e.lossTangent = l.getLossTangent();
             e.copperWeightOz = l.getCopperWeightOz();

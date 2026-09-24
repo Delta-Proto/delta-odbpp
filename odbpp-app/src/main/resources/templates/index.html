@@ -99,6 +99,13 @@
         }
         .upload-btn:hover { background: var(--primary-hover); }
         #file-input { display: none; }
+        .example-btn {
+            background: none; color: var(--primary); border: none; padding: 7px 4px;
+            cursor: pointer; font-size: 0.875rem; font-weight: 500; font-family: inherit;
+            text-decoration: underline; text-underline-offset: 2px;
+            transition: color 0.15s;
+        }
+        .example-btn:hover { color: var(--primary-hover); }
         .header-checkbox {
             display: flex; align-items: center; gap: 6px; font-size: 0.8125rem;
             cursor: pointer; color: var(--fg-muted);
@@ -108,28 +115,46 @@
             background: none; border: 1px solid var(--border); width: 36px; height: 36px;
             border-radius: 8px; cursor: pointer; display: flex; align-items: center;
             justify-content: center; color: var(--fg-muted); transition: background 0.15s, color 0.15s;
+            flex-shrink: 0; text-decoration: none;
         }
         .theme-toggle:hover { background: var(--item-hover); color: var(--fg); }
-        .zoom-controls { display: flex; gap: 6px; margin-left: auto; align-items: center; }
+        /* The running library version, filled in by the server; hidden if it can't tell. */
+        .app-version {
+            margin-left: auto; font-size: 0.75rem; color: var(--fg-faint);
+            font-variant-numeric: tabular-nums; white-space: nowrap;
+        }
+        /* Zoom controls float over the artwork, in the viewer's top-right corner. */
+        .zoom-controls {
+            position: absolute; top: 10px; right: 12px; z-index: 2;
+            display: flex; gap: 4px; align-items: center;
+        }
         .zoom-btn {
             background: var(--bg-input); color: var(--fg); border: 1px solid var(--border);
-            width: 36px; height: 36px; border-radius: 8px; cursor: pointer; font-size: 1.1rem;
+            width: 30px; height: 30px; border-radius: 8px; cursor: pointer; font-size: 1rem;
             display: flex; align-items: center; justify-content: center;
             transition: background 0.15s; font-family: inherit;
         }
         .zoom-btn:hover { background: var(--item-hover); }
         .zoom-level {
-            background: var(--bg-input); border: 1px solid var(--border); padding: 6px 10px;
-            border-radius: 8px; font-size: 0.8rem; min-width: 56px; text-align: center;
-            color: var(--fg-muted);
+            background: var(--bg-input); border: 1px solid var(--border); padding: 6px 8px;
+            border-radius: 8px; font-size: 0.75rem; min-width: 52px; text-align: center;
+            color: var(--fg-muted); font-variant-numeric: tabular-nums;
         }
 
         /* ===== Layout ===== */
         .main-container { display: flex; flex: 1; overflow: hidden; }
         .sidebar {
-            width: 280px; background: var(--bg-card); border-right: 1px solid var(--border);
+            width: 280px; flex-shrink: 0; background: var(--bg-card);
+            border-right: 1px solid var(--border);
             padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px;
         }
+        .sidebar-resizer {
+            width: 5px; flex-shrink: 0; cursor: col-resize; background: transparent;
+            transition: background 0.15s; margin-left: -3px; z-index: 10; position: relative;
+        }
+        .sidebar-resizer:hover, .sidebar-resizer.dragging { background: var(--primary); }
+        body.resizing-sidebar { cursor: col-resize; user-select: none; }
+        body.resizing-sidebar * { cursor: col-resize !important; }
         .sidebar h2 {
             font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;
             color: var(--fg-muted); margin-bottom: 4px; font-weight: 600;
@@ -138,16 +163,36 @@
         /* ===== View Tabs ===== */
         .view-tabs {
             display: flex; gap: 2px; padding: 8px 16px; background: var(--bg-card);
-            border-bottom: 1px solid var(--border);
+            border-bottom: 1px solid var(--border); flex-wrap: wrap; row-gap: 4px;
         }
         .view-tab {
-            background: transparent; color: var(--fg-muted); border: none; padding: 8px 16px;
+            background: transparent; color: var(--fg-muted); border: none; padding: 8px 12px;
             border-radius: 8px 8px 0 0; cursor: pointer; font-size: 0.8125rem;
             transition: background 0.15s, color 0.15s; font-family: inherit; font-weight: 500;
+            display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+            white-space: nowrap;
         }
         .view-tab:hover { background: var(--item-hover); color: var(--fg); }
         .view-tab.active { background: var(--tab-active-bg); color: var(--primary); font-weight: 600; }
         .view-tab:disabled { cursor: not-allowed; opacity: 0.4; }
+        .view-tab svg { width: 14px; height: 14px; flex-shrink: 0; }
+        /* Soldermask color swatches — pick the realistic view's mask color. */
+        .soldermask-swatches {
+            display: inline-flex; align-items: center; gap: 5px;
+            margin-left: 6px; padding-left: 12px; border-left: 1px solid var(--border);
+        }
+        .sm-swatch {
+            width: 16px; height: 16px; padding: 0; border-radius: 4px; cursor: pointer;
+            border: 1px solid rgba(0,0,0,0.25); box-sizing: border-box;
+            transition: transform 0.08s ease, box-shadow 0.08s ease;
+        }
+        .sm-swatch:hover { transform: scale(1.15); }
+        .sm-swatch.active { box-shadow: 0 0 0 2px var(--bg-card), 0 0 0 4px var(--ring); }
+        .btn-spinner {
+            width: 14px; height: 14px; border: 2px solid var(--spinner-track);
+            border-top-color: var(--primary); border-radius: 50%;
+            animation: spin 1s linear infinite; display: inline-block; flex-shrink: 0;
+        }
 
         /* ===== Layer Controls ===== */
         .side-btn {
@@ -189,8 +234,39 @@
             background-image:
                 linear-gradient(var(--grid-line) 1px, transparent 1px),
                 linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
-            background-size: 20px 20px;
+            background-size: 37.795px 37.795px;   /* 10 mm; updateTransform() rescales it */
         }
+        /* Table views (stackup, BOM) cover the artwork, so the pan/zoom furniture goes with it. */
+        .viewer-container.data-view .zoom-controls,
+        .viewer-container.data-view .grid-hint { display: none; }
+        /* What one grid square means — small, out of the way, never in the pointer's path. */
+        .grid-hint {
+            position: absolute; left: 12px; bottom: 10px; z-index: 1;
+            font-size: 0.6875rem; color: var(--fg-faint); pointer-events: none;
+            font-variant-numeric: tabular-nums;
+        }
+        /* Components drawn over the realistic board: translucent so the pads show through,
+           and lit up on hover together with the BOM hover card. */
+        .comp-overlay [data-outline] { fill-opacity: 0.45; transition: fill-opacity 0.1s; }
+        .comp-overlay [data-refdes]:hover [data-outline],
+        .comp-overlay [data-refdes].comp-hover [data-outline] { fill-opacity: 0.85; }
+        .comp-overlay [data-refdes] { cursor: pointer; }
+        .comp-overlay text { pointer-events: none; }
+        .comp-hovercard {
+            position: absolute; z-index: 5; pointer-events: none; max-width: 340px;
+            background: var(--tooltip-bg); color: var(--fg); border: 1px solid var(--tooltip-border);
+            border-radius: 8px; box-shadow: 0 8px 24px var(--tooltip-shadow); padding: 10px 12px;
+            font-size: 0.75rem; line-height: 1.4;
+        }
+        .comp-hovercard.hidden { display: none; }
+        .comp-hovercard h4 {
+            font-size: 0.875rem; font-weight: 600; margin: 0 0 6px; display: flex; gap: 8px; align-items: baseline;
+        }
+        .comp-hovercard h4 .side { font-size: 0.6875rem; font-weight: 500; color: var(--fg-muted); }
+        .comp-hovercard dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin: 0; }
+        .comp-hovercard dt { color: var(--fg-muted); white-space: nowrap; }
+        .comp-hovercard dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+        .comp-hovercard .desc { margin-top: 6px; color: var(--fg-muted); font-style: italic; }
         #svg-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: grab; }
         #svg-container:active { cursor: grabbing; }
         #svg-content { transform-origin: 0 0; }
@@ -206,12 +282,6 @@
         .drop-zone svg { width: 80px; height: 80px; margin-bottom: 16px; opacity: 0.4; }
         .drop-zone p { font-size: 1.1rem; margin-bottom: 8px; }
         .drop-zone small { font-size: 0.85rem; color: var(--fg-faint); }
-        .drop-zone .try-example {
-            margin-top: 18px; display: inline-block; padding: 8px 16px;
-            border: 1px solid var(--border); border-radius: 6px; background: transparent;
-            color: var(--fg); cursor: pointer; font-size: 0.9rem;
-        }
-        .drop-zone .try-example:hover { background: var(--item-hover); border-color: var(--primary); color: var(--primary); }
         .drag-over { background: var(--drag-tint) !important; }
         .loading {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
@@ -265,8 +335,12 @@
         .recent-item .recent-delete:hover { color: var(--accent-red); }
 
         /* ===== BOM table ===== */
+        /* The BOM fills the data panel as a column: a fixed toolbar over a table that scrolls
+           on its own, so the sticky column header can sit at top:0 of that scroller instead of
+           guessing the toolbar's height (which wraps at narrow widths and overlapped row 1). */
+        .bom-view { display: flex; flex-direction: column; height: 100%; }
         .bom-toolbar {
-            position: sticky; top: 0; z-index: 2;
+            flex: none; z-index: 2;
             display: flex; gap: 12px; align-items: center;
             padding: 10px 16px; background: var(--bg);
             border-bottom: 1px solid var(--border); flex-wrap: wrap;
@@ -285,7 +359,7 @@
             font-size: 0.825rem;
         }
         .bom-export:hover { background: var(--item-hover); border-color: var(--primary); color: var(--primary); }
-        .bom-table-wrap { overflow: auto; padding: 0 0 16px; }
+        .bom-table-wrap { flex: 1; min-height: 0; overflow: auto; padding: 0 0 16px; }
         .bom-table {
             width: 100%; border-collapse: collapse; font-size: 0.825rem;
             font-variant-numeric: tabular-nums;
@@ -295,8 +369,9 @@
             border-bottom: 1px solid var(--border); vertical-align: top;
         }
         .bom-table thead th {
-            position: sticky; top: 50px; z-index: 1;
+            position: sticky; top: 0; z-index: 1;
             background: var(--bg); cursor: pointer; user-select: none;
+            box-shadow: inset 0 -1px 0 var(--border);
             font-weight: 600; color: var(--fg);
         }
         .bom-table thead th:hover { color: var(--primary); }
@@ -318,6 +393,55 @@
         .refdes-pill:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,0.25); }
         .refdes-pill.side-top    { background: rgba(106,174,214,0.18); border-color: #6aaed6; color: #6aaed6; }
         .refdes-pill.side-bottom { background: rgba(232,150,84,0.18);  border-color: #e89654; color: #e89654; }
+
+        /* ===== Stack-up table (DeltaProto PCB specification sheet look) ===== */
+        .dp-spec-sheet {
+            --dp-blue: #0070c0; --dp-radius-sm: 4px;
+            max-width: 1100px; margin: 0 auto; padding: 20px;
+            color: var(--fg); font-size: 0.8125rem; line-height: 1.45;
+        }
+        .dp-table {
+            width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed;
+            margin-bottom: 0.75rem;
+        }
+        .dp-table th, .dp-table td { box-sizing: border-box; overflow-wrap: anywhere; }
+        .dp-table thead th {
+            background: var(--dp-blue); color: #fff; font-weight: 600; text-align: left;
+            padding: 5px 11px;
+        }
+        .dp-table-title th {
+            font-size: 0.9375rem; font-weight: 700; padding: 7px 11px;
+            border-bottom: 6px solid var(--bg);
+        }
+        .dp-table-title th:first-child { border-top-left-radius: var(--dp-radius-sm); border-bottom-left-radius: var(--dp-radius-sm); }
+        .dp-table-title th:last-child  { border-top-right-radius: var(--dp-radius-sm); border-bottom-right-radius: var(--dp-radius-sm); }
+        .dp-table-title + tr th {
+            font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.85;
+        }
+        .dp-table-title + tr th:first-child { border-top-left-radius: var(--dp-radius-sm); }
+        .dp-table-title + tr th:last-child  { border-top-right-radius: var(--dp-radius-sm); }
+        .dp-table tbody td { padding: 3px 11px; vertical-align: middle; border-bottom: none; }
+        .dp-col-chip { width: 30%; }
+        .dp-col-file { width: 27%; }
+        .dp-col-material { width: 23%; }
+        .dp-chip {
+            display: block; box-sizing: border-box; padding: 3px 8px;
+            border-radius: var(--dp-radius-sm); background: var(--dp-swatch, transparent);
+            color: #fff; font-weight: 600; line-height: 1.25;
+            box-shadow: inset 0 0 0 1px rgba(128,128,128,0.25);
+        }
+        .dp-chip--light { color: #1b1b1b; }
+        .dp-chip--plain { background: transparent; color: var(--fg); padding-left: 0; box-shadow: none; }
+        .dp-chip--thick { padding-top: 6px; padding-bottom: 6px; }
+        .dp-stack-meta { color: var(--fg-muted); }
+        .dp-stack-file { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.75rem; }
+        .dp-stack-est { font-style: italic; color: var(--fg-faint); }
+        .dp-stack-total {
+            display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 16px;
+            margin: 0 0 6px; padding: 5px 11px 0; border-top: 1px solid var(--border-subtle);
+            color: var(--fg-muted);
+        }
+        .dp-stack-note { text-align: right; padding: 0 11px; color: var(--fg-faint); font-size: 0.75rem; }
     </style>
 </head>
 <body class="dark">
@@ -338,18 +462,26 @@
             <input type="file" id="file-input" accept=".zip,.tgz,.tar.gz">
             Open File
         </label>
-        <div class="zoom-controls">
-            <button class="zoom-btn" id="zoom-out" title="Zoom Out">-</button>
-            <span class="zoom-level" id="zoom-level">100%</span>
-            <button class="zoom-btn" id="zoom-in" title="Zoom In">+</button>
-            <button class="zoom-btn" id="zoom-fit" title="Fit to View">&#8644;</button>
-        </div>
+        <button class="example-btn" onclick="loadExampleArchive()" title="Load the bundled example archive">Try Example</button>
+        <span class="app-version" id="app-version" title="Delta ODB++ version" th:text="${appVersion}"></span>
         <button class="theme-toggle" id="theme-toggle" title="Toggle light/dark mode" onclick="toggleTheme()">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="12" cy="12" r="4" id="theme-icon-sun-parts"/>
                 <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" id="theme-icon-rays"/>
             </svg>
         </button>
+        <a class="theme-toggle" href="https://github.com/Delta-Proto/delta-odbpp" target="_blank"
+           rel="noopener" title="Delta ODB++ on GitHub" aria-label="Delta ODB++ on GitHub">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                    0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01
+                    1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95
+                    0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0
+                    1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87
+                    3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16
+                    8c0-4.42-3.58-8-8-8z"/>
+            </svg>
+        </a>
     </header>
 
     <div class="main-container">
@@ -378,8 +510,9 @@
                 </div>
             </div>
         </aside>
+        <div class="sidebar-resizer" id="sidebar-resizer" title="Drag to resize"></div>
 
-        <div style="flex:1; display:flex; flex-direction:column; overflow:hidden;">
+        <div style="flex:1; display:flex; flex-direction:column; overflow:hidden; min-width:0;">
             <div class="view-tabs" id="view-tabs" style="display:none;">
                 <button class="view-tab active" data-view="layers" onclick="switchView('layers')">All Layers</button>
                 <button class="view-tab" data-view="top" onclick="switchView('top')">Board Top</button>
@@ -388,20 +521,52 @@
                 <button class="view-tab" data-view="comp-bottom" onclick="switchView('comp-bottom')">Components Bottom</button>
                 <button class="view-tab" data-view="stackup" onclick="switchView('stackup')">Stackup</button>
                 <button class="view-tab" data-view="bom" onclick="switchView('bom')">BOM</button>
+                <span class="soldermask-swatches" id="soldermask-swatches" title="Soldermask color (realistic view)">
+                    <button class="sm-swatch active" data-color="green"  style="background:#008635" onclick="setSoldermask('green')"  title="Green"></button>
+                    <button class="sm-swatch"        data-color="purple" style="background:#ac13a6" onclick="setSoldermask('purple')" title="Purple"></button>
+                    <button class="sm-swatch"        data-color="red"    style="background:#bf0100" onclick="setSoldermask('red')"    title="Red"></button>
+                    <button class="sm-swatch"        data-color="yellow" style="background:#ffaa16" onclick="setSoldermask('yellow')" title="Yellow"></button>
+                    <button class="sm-swatch"        data-color="blue"   style="background:#002d8c" onclick="setSoldermask('blue')"   title="Blue"></button>
+                    <button class="sm-swatch"        data-color="white"  style="background:#f7f9fe" onclick="setSoldermask('white')"  title="White"></button>
+                    <button class="sm-swatch"        data-color="black"  style="background:#0f1010" onclick="setSoldermask('black')"  title="Black"></button>
+                </span>
                 <span style="flex:1"></span>
-                <button class="view-tab download-btn" id="download-top-png" title="Download realistic top as PNG"
-                        onclick="downloadThumbnail('top')" disabled>PNG Top</button>
-                <button class="view-tab download-btn" id="download-bottom-png" title="Download realistic bottom as PNG"
-                        onclick="downloadThumbnail('bottom')" disabled>PNG Bottom</button>
+                <button class="view-tab" id="png-top-btn" onclick="downloadThumbnail('top')" disabled
+                    title="Download PNG thumbnail of the realistic top view">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    <span>PNG Top</span>
+                </button>
+                <button class="view-tab" id="png-bot-btn" onclick="downloadThumbnail('bottom')" disabled
+                    title="Download PNG thumbnail of the realistic bottom view">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    <span>PNG Bottom</span>
+                </button>
             </div>
             <div class="viewer-container" id="viewer-container">
+                <div class="zoom-controls">
+                    <button class="zoom-btn" id="zoom-out" title="Zoom Out">-</button>
+                    <span class="zoom-level" id="zoom-level">100%</span>
+                    <button class="zoom-btn" id="zoom-in" title="Zoom In">+</button>
+                    <button class="zoom-btn" id="zoom-fit" title="Fit to View">&#8644;</button>
+                </div>
+                <div class="grid-hint" id="grid-hint">Grid 10 &times; 10 mm</div>
+                <div class="comp-hovercard hidden" id="comp-hovercard"></div>
                 <div class="drop-zone" id="drop-zone">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/>
                     </svg>
                     <p>Drop an ODB++ file here</p>
                     <small>or click "Open File" above (.zip, .tgz, .tar.gz)</small>
-                    <div><button class="try-example" onclick="loadExampleArchive()">Try Example</button></div>
                 </div>
                 <div class="loading hidden" id="loading">
                     <div class="spinner"></div>
@@ -427,8 +592,25 @@
         const STORE_NAME = 'projects';
         const MAX_RECENT = 5;
         // The model is mm-normalised at parse time, so SVG viewBoxes are always in mm.
-        // Use the CSS reference of 3.7795 px/mm (96 dpi).
-        const PX_PER_MM = 3.7795;
+        /** CSS pixels per millimetre at 100% — the SVG is sized in mm, and CSS puts 96 dpi on it. */
+        const PX_PER_MM = 96 / 25.4;
+        /** Backdrop grid pitch in millimetres, as announced by the hint in the viewer's corner. */
+        const GRID_MM = 10;
+
+        // Soldermask color options for the realistic view. `mask`/`silk` are the
+        // colors actually rendered (mirrors SoldermaskColor.java); the tab swatch
+        // shows the fab's brighter advertised color. GREEN keeps our darker, more
+        // realistic mask shade rather than the bright swatch green.
+        const SOLDERMASK_COLORS = {
+            green:  { mask: '#004200', silk: '#ffffff' },
+            purple: { mask: '#ac13a6', silk: '#ffffff' },
+            red:    { mask: '#bf0100', silk: '#ffffff' },
+            yellow: { mask: '#ffaa16', silk: '#ffffff' },
+            blue:   { mask: '#002d8c', silk: '#ffffff' },
+            white:  { mask: '#f7f9fe', silk: '#000000' },
+            black:  { mask: '#0f1010', silk: '#ffffff' },
+        };
+        let selectedSoldermask = 'green';
 
         // ===== State =====
         let layers = [];
@@ -701,10 +883,11 @@
                     bomTab.disabled = !has;
                     bomTab.style.opacity = has ? 1 : 0.4;
                 }
-                const topDl = document.getElementById('download-top-png');
-                const botDl = document.getElementById('download-bottom-png');
+                const topDl = document.getElementById('png-top-btn');
+                const botDl = document.getElementById('png-bot-btn');
                 if (topDl) topDl.disabled = !realisticTopSvg;
                 if (botDl) botDl.disabled = !realisticBottomSvg;
+                buildPlacementIndex();
 
                 // Render
                 currentView = 'layers';
@@ -743,14 +926,22 @@
         // ===== PNG thumbnail download =====
         async function downloadThumbnail(side) {
             if (!currentFile) return;
-            const btn = document.getElementById(
-                side === 'top' ? 'download-top-png' : 'download-bottom-png');
-            const oldLabel = btn ? btn.textContent : '';
-            if (btn) { btn.disabled = true; btn.textContent = 'Rendering…'; }
+            const btn = document.getElementById(side === 'top' ? 'png-top-btn' : 'png-bot-btn');
+            if (btn && btn.disabled) return;
+            // Lock the button's current size so swapping to a spinner doesn't reflow the tab bar.
+            const rect = btn ? btn.getBoundingClientRect() : null;
+            const originalHtml = btn ? btn.innerHTML : '';
+            if (btn) {
+                btn.style.width = rect.width + 'px';
+                btn.style.height = rect.height + 'px';
+                btn.disabled = true;
+                btn.innerHTML = '<span class="btn-spinner" aria-label="Generating"></span>';
+            }
             try {
                 const form = new FormData();
                 form.append('file', currentFile);
-                const url = API_BASE + '/api/odbpp/thumbnail?side=' + encodeURIComponent(side) + '&width=1600';
+                const url = API_BASE + '/api/odbpp/thumbnail?side=' + encodeURIComponent(side)
+                          + '&width=1600&soldermask=' + encodeURIComponent(selectedSoldermask);
                 const resp = await fetch(url, { method: 'POST', body: form });
                 if (!resp.ok) {
                     const text = await resp.text();
@@ -769,24 +960,42 @@
             } catch (e) {
                 alert(e.message);
             } finally {
-                if (btn) { btn.disabled = false; btn.textContent = oldLabel; }
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = originalHtml;
+                    btn.style.width = '';
+                    btn.style.height = '';
+                }
             }
         }
 
         // ===== SVG rendering =====
+        // The bottom-side renders arrive mirrored about the vertical axis, the way the board
+        // looks once you turn it over like a page — so they are shown as delivered, not
+        // re-mirrored into an X-ray view.
         function renderSvg() {
-            let svgStr = null, flipX = false;
+            let svgStr = null, overlayStr = null;
             if (currentView === 'layers') svgStr = combinedSvg;
             else if (currentView === 'top') svgStr = realisticTopSvg;
-            else if (currentView === 'bottom') { svgStr = realisticBottomSvg; flipX = true; }
-            else if (currentView === 'comp-top') svgStr = componentsTopSvg;
-            else if (currentView === 'comp-bottom') { svgStr = componentsBottomSvg; flipX = true; }
-            else if (currentView === 'stackup') { renderStackup(); return; }
-            else if (currentView === 'bom') { renderBom(); return; }
+            else if (currentView === 'bottom') svgStr = realisticBottomSvg;
+            else if (currentView === 'comp-top') {
+                // Components sit on the realistic board when there is one; the silhouette
+                // render stands alone otherwise.
+                svgStr = realisticTopSvg || componentsTopSvg;
+                overlayStr = realisticTopSvg ? componentsTopSvg : null;
+            }
+            else if (currentView === 'comp-bottom') {
+                svgStr = realisticBottomSvg || componentsBottomSvg;
+                overlayStr = realisticBottomSvg ? componentsBottomSvg : null;
+            }
+            else if (currentView === 'stackup') { viewerContainer.classList.add('data-view'); renderStackup(); return; }
+            else if (currentView === 'bom') { viewerContainer.classList.add('data-view'); renderBom(); return; }
 
             // SVG views live in the pan/zoom container
+            viewerContainer.classList.remove('data-view');
             svgContainer.classList.remove('hidden');
             dataPanel.classList.add('hidden');
+            hideHoverCard();
 
             if (!svgStr) {
                 const msg = currentView.startsWith('comp-')
@@ -810,22 +1019,177 @@
                 }
                 svg.style.overflow = 'visible';
 
-                // For bottom view, mirror the viewport horizontally
-                if (flipX && vb) {
-                    const [vx,,vw] = vb.split(' ').map(Number);
-                    const viewport = svg.querySelector('#viewport');
-                    if (viewport) {
-                        const t = viewport.getAttribute('transform') || '';
-                        viewport.setAttribute('transform',
-                            `translate(${vx + vw + vx}, 0) scale(-1, 1) ${t}`);
-                    }
-                }
+                if (overlayStr) overlayComponents(svg, overlayStr);
+                applySoldermaskColor(svg);
 
                 svgContent.innerHTML = '';
                 svgContent.appendChild(svg);
             }
             updateTransform();
         }
+
+        // ===== Soldermask color =====
+        function setSoldermask(name) {
+            if (!SOLDERMASK_COLORS[name]) return;
+            selectedSoldermask = name;
+            document.querySelectorAll('.sm-swatch').forEach(s =>
+                s.classList.toggle('active', s.dataset.color === name));
+            // Recolor the realistic view in place (no server round-trip).
+            const svg = svgContent.querySelector('svg');
+            if (svg) applySoldermaskColor(svg);
+        }
+
+        // Recolor the soldermask + silkscreen of a realistic SVG to the selected color.
+        // The renderer tags the mask rect (.pcb-soldermask) and silkscreen group
+        // (.pcb-silkscreen); silkscreen child shapes carry explicit fill/stroke, so we
+        // rewrite each non-"none" value to match what the renderer would emit. No-op on
+        // the all-layers view, which has neither marker.
+        function applySoldermaskColor(svgEl) {
+            const c = SOLDERMASK_COLORS[selectedSoldermask];
+            if (!svgEl || !c) return;
+            svgEl.querySelectorAll('.pcb-soldermask').forEach(el => el.setAttribute('fill', c.mask));
+            svgEl.querySelectorAll('.pcb-silkscreen').forEach(g => {
+                g.setAttribute('fill', c.silk);
+                g.setAttribute('color', c.silk);
+                g.querySelectorAll('*').forEach(el => {
+                    const f = el.getAttribute('fill');
+                    if (f && f !== 'none') el.setAttribute('fill', c.silk);
+                    const s = el.getAttribute('stroke');
+                    if (s && s !== 'none') el.setAttribute('stroke', c.silk);
+                });
+            });
+        }
+
+        // ===== Components over the realistic board =====
+        // The realistic and components renders share viewBox and viewport transform (both are
+        // framed on the step profile with the same padding), so the components group can be
+        // lifted out of its own SVG and dropped into the realistic one's viewport as-is.
+        function overlayComponents(realSvg, componentsSvgStr) {
+            const compDoc = new DOMParser().parseFromString(componentsSvgStr, 'image/svg+xml');
+            const group = compDoc.querySelector('[data-stack-layer="components"]');
+            const viewport = realSvg.querySelector('#viewport');
+            if (!group || !viewport) return;
+            const imported = realSvg.ownerDocument.importNode(group, true);
+            imported.classList.add('comp-overlay');
+            viewport.appendChild(imported);
+        }
+
+        // refdes → { row, placement } from the BOM payload, for the hover card.
+        let placementIndex = new Map();
+        function buildPlacementIndex() {
+            placementIndex = new Map();
+            for (const row of billData || []) {
+                for (const p of row.refdesList || []) {
+                    if (p.refdes) placementIndex.set(p.refdes, { row, placement: p });
+                }
+            }
+        }
+
+        const hoverCard = document.getElementById('comp-hovercard');
+        let hoveredComp = null;
+
+        function hideHoverCard() {
+            hoverCard.classList.add('hidden');
+            if (hoveredComp) { hoveredComp.classList.remove('comp-hover'); hoveredComp = null; }
+        }
+
+        /**
+         * The card's HTML for one designator. `inTable` is the BOM view, whose row already shows
+         * part number, package, manufacturer, MPN, item, quantity and description — there the
+         * card keeps only what the table does not: side, IPN, centroid, rotation, mirror, body.
+         */
+        function hoverCardHtml(refdes, hit, inTable) {
+            const esc = s => String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+            const num = (v, d) => (v == null || isNaN(v)) ? '—' : Number(v).toFixed(d);
+            const row = hit ? hit.row : null;
+            const p = hit ? hit.placement : null;
+            const side = p && p.side ? p.side.charAt(0) + p.side.slice(1).toLowerCase() : '';
+            const rows = [];
+            const add = (k, v) => { if (v != null && v !== '') rows.push(`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`); };
+            if (row && !inTable) {
+                add('Part number', row.partNumber);
+                add('Package', row.packageName || (p && p.packageName));
+                add('Manufacturer', row.manufacturer);
+                add('MPN', row.mpn);
+                add('IPN', row.ipn);
+                add('BOM item', row.item != null ? '#' + row.item : (row.orphan ? 'not in BOM' : null));
+                add('Quantity', row.quantity || (row.refdesList ? row.refdesList.length : null));
+            } else if (row && inTable) {
+                add('IPN', row.ipn);
+                // The table shows the row's package; only say so when this placement differs.
+                if (p && p.packageName && p.packageName !== row.packageName) add('Package', p.packageName);
+            } else if (p && p.packageName) {
+                add('Package', p.packageName);
+            }
+            if (p) {
+                add('Centroid', num(p.xMm, 3) + ', ' + num(p.yMm, 3) + ' mm');
+                add('Rotation', num(p.rotation, 1) + '°');
+                add('Mirror', p.mirror === 'M' ? 'yes' : p.mirror === 'N' ? 'no' : p.mirror);
+                if (p.bboxXMinMm != null && p.bboxXMaxMm != null && p.bboxYMinMm != null && p.bboxYMaxMm != null) {
+                    add('Body', num(p.bboxXMaxMm - p.bboxXMinMm, 2) + ' × ' + num(p.bboxYMaxMm - p.bboxYMinMm, 2) + ' mm');
+                }
+            }
+            let html = `<h4>${esc(refdes)}${side ? `<span class="side">${esc(side)}</span>` : ''}</h4>`;
+            html += rows.length ? `<dl>${rows.join('')}</dl>`
+                                : `<div class="desc">${inTable ? 'No placement data for this designator.' : 'No BOM data for this part.'}</div>`;
+            if (row && row.description && !inTable) html += `<div class="desc">${esc(row.description)}</div>`;
+            return html;
+        }
+
+        function positionHoverCard(e) {
+            const rect = viewerContainer.getBoundingClientRect();
+            const pad = 14;
+            let x = e.clientX - rect.left + pad;
+            let y = e.clientY - rect.top + pad;
+            const cw = hoverCard.offsetWidth, ch = hoverCard.offsetHeight;
+            if (x + cw > rect.width - 8) x = e.clientX - rect.left - cw - pad;
+            if (y + ch > rect.height - 8) y = e.clientY - rect.top - ch - pad;
+            hoverCard.style.left = Math.max(4, x) + 'px';
+            hoverCard.style.top = Math.max(4, y) + 'px';
+        }
+
+        function compUnderPointer(e) {
+            const el = e.target instanceof Element ? e.target : null;
+            if (!el) return null;
+            const label = el.closest('[data-refdes-label]');
+            if (label) {
+                const rd = label.getAttribute('data-refdes-label');
+                return svgContent.querySelector(`[data-refdes="${CSS.escape(rd)}"]`) || label;
+            }
+            return el.closest('[data-refdes]');
+        }
+
+        svgContent.addEventListener('mousemove', (e) => {
+            if (!currentView.startsWith('comp-') || isPanning) { if (hoveredComp) hideHoverCard(); return; }
+            const comp = compUnderPointer(e);
+            if (!comp) { hideHoverCard(); return; }
+            const refdes = comp.getAttribute('data-refdes') || comp.getAttribute('data-refdes-label');
+            if (comp !== hoveredComp) {
+                if (hoveredComp) hoveredComp.classList.remove('comp-hover');
+                hoveredComp = comp;
+                comp.classList.add('comp-hover');
+                hoverCard.innerHTML = hoverCardHtml(refdes, placementIndex.get(refdes));
+                hoverCard.classList.remove('hidden');
+            }
+            positionHoverCard(e);
+        });
+        svgContent.addEventListener('mouseleave', hideHoverCard);
+
+        // BOM designator pills use the same card, in its table mode.
+        let hoveredPill = null;
+        dataPanel.addEventListener('mousemove', (e) => {
+            const pill = e.target instanceof Element ? e.target.closest('.refdes-pill') : null;
+            if (!pill) { if (hoveredPill) { hoveredPill = null; hideHoverCard(); } return; }
+            if (pill !== hoveredPill) {
+                hoveredPill = pill;
+                const refdes = pill.getAttribute('data-refdes');
+                hoverCard.innerHTML = hoverCardHtml(refdes, placementIndex.get(refdes), true);
+                hoverCard.classList.remove('hidden');
+            }
+            positionHoverCard(e);
+        });
+        dataPanel.addEventListener('mouseleave', () => { hoveredPill = null; hideHoverCard(); });
 
         function switchView(view) {
             if (view === 'top' && !realisticTopSvg) return;
@@ -842,17 +1206,103 @@
             if (view !== 'stackup' && view !== 'bom') fitToView();
         }
 
-        // ===== Stackup cross-section rendering =====
-        const STACKUP_COLORS = {
-            SIGNAL:         { fill: '#c98c3b', stroke: '#8a5b1d' },  // copper
-            POWER_GROUND:   { fill: '#b67a30', stroke: '#78501d' },  // copper (darker)
-            MIXED:          { fill: '#c98c3b', stroke: '#8a5b1d' },
-            DIELECTRIC:     { fill: '#d8c38a', stroke: '#8a7a4a' },  // tan (FR-4)
-            SOLDER_MASK:    { fill: '#1c7a3a', stroke: '#0a4020' },  // green
-            SILK_SCREEN:    { fill: '#f2f2f2', stroke: '#777' },     // off-white
-            SOLDER_PASTE:   { fill: '#9a9a9a', stroke: '#555' },     // gray
-            CONDUCTIVE_PASTE: { fill: '#b76a9c', stroke: '#6a3d59' },
+        // ===== Stackup table =====
+        // Mirrors the "Stack-up, materials, thickness and colours" table of the DeltaProto PCB
+        // specification sheet (deltaproto.com /pcbspec and the PDF report): a blue title band, a
+        // column band, one coloured chip per physical layer, and a stack-sum line underneath.
+        const STACK_SWATCH = {
+            copper:     '#f96607',
+            dielectric: '#efe6b5',
+            soldermask: '#0bad53',
+            silkscreen: '#d8d9d3',
+            paste:      '#afb0b0',
+            finish:     '#fabf1b',
         };
+
+        function formatLengthMm(mm) {
+            if (!(mm > 0)) return '—';
+            if (mm >= 1) return trimNum(mm, 3) + ' mm';
+            return trimNum(mm * 1000, 1) + ' µm';
+        }
+        function trimNum(v, decimals) {
+            return Number(v.toFixed(decimals)).toString();
+        }
+        function ozLabel(oz) {
+            if (oz == null) return '';
+            const snapped = Math.abs(oz - Math.round(oz * 2) / 2) < 0.06 ? Math.round(oz * 2) / 2 : oz;
+            return trimNum(snapped, 2) + ' oz';
+        }
+        function titleCase(s) {
+            return (s || '').toLowerCase().replace(/(^|[\s_-])(\w)/g, (m, sep, c) => sep + c.toUpperCase());
+        }
+        // "Top Soldermask" / "Bottom Silkscreen (Overlay)" for the outer sides; a finish that sits
+        // inside the stack (a rigid-flex coverlay, say) keeps its own layer name instead of a
+        // side it does not have.
+        function finishName(e, what) {
+            if (e.side === 'TOP') return 'Top ' + what;
+            if (e.side === 'BOTTOM') return 'Bottom ' + what;
+            return e.name + ' (' + what + ')';
+        }
+
+        // Build the table rows from the StackupView entries (already ordered top → bottom).
+        function stackRows(entries) {
+            const conductorCount = entries.filter(e => e.conductor).length;
+            let conductorsSeen = 0;
+            let innerIndex = 0;
+            return entries.map(e => {
+                const row = {
+                    name: e.name, file: e.name, swatch: null, light: false, thick: false,
+                    material: e.material || '', thickness: formatLengthMm(e.thicknessMm),
+                    // A typical stands in only where there is a number to stand in for.
+                    estimated: !!e.estimated && e.thicknessMm > 0,
+                };
+                const type = (e.type || '').toUpperCase();
+                if (e.conductor) {
+                    conductorsSeen++;
+                    if (e.side === 'TOP' || (conductorsSeen === 1 && e.side !== 'BOTTOM')) {
+                        row.name = 'Top Conductive Layer';
+                    } else if (e.side === 'BOTTOM' || conductorsSeen === conductorCount) {
+                        row.name = 'Bottom Conductive Layer';
+                    } else {
+                        innerIndex++;
+                        row.name = 'Internal Conductive Layer ' + innerIndex;
+                    }
+                    row.swatch = STACK_SWATCH.copper;
+                    const kind = type === 'POWER_GROUND' ? 'Plane' : type === 'MIXED' ? 'Mixed' : 'Signal';
+                    row.material = [e.material || 'Copper', kind].join(' · ');
+                    if (e.copperWeightOz != null) row.thickness += ' (' + ozLabel(e.copperWeightOz) + ')';
+                } else if (e.dielectric || type === 'DIELECTRIC') {
+                    const above = Math.max(1, conductorsSeen);
+                    row.name = 'Dielectric ' + above + '-' + (above + 1);
+                    row.swatch = STACK_SWATCH.dielectric;
+                    row.light = true;
+                    row.thick = e.thicknessMm >= 0.4;
+                    const parts = [];
+                    if (e.material) parts.push(e.material);
+                    if (e.dielectricType) parts.push(titleCase(e.dielectricType));
+                    if (e.dielectricConstant != null) parts.push('Dk ' + e.dielectricConstant);
+                    row.material = parts.join(' · ');
+                } else if (type === 'SOLDER_MASK') {
+                    row.name = finishName(e, 'Soldermask');
+                    row.swatch = STACK_SWATCH.soldermask;
+                    row.light = true;
+                } else if (type === 'SILK_SCREEN') {
+                    row.name = finishName(e, 'Silkscreen (Overlay)');
+                    row.swatch = STACK_SWATCH.silkscreen;
+                    row.light = true;
+                } else if (type === 'SOLDER_PASTE') {
+                    row.name = finishName(e, 'Paste Layer (Stencil)');
+                    row.swatch = STACK_SWATCH.paste;
+                    row.light = true;
+                    row.material = e.material || 'Stencil';
+                } else if (type === 'CONDUCTIVE_PASTE') {
+                    row.name = finishName(e, 'Conductive Paste');
+                    row.swatch = STACK_SWATCH.finish;
+                    row.light = true;
+                }
+                return row;
+            });
+        }
 
         function renderStackup() {
             svgContainer.classList.add('hidden');
@@ -862,82 +1312,48 @@
                 return;
             }
 
-            // Layout constants (in logical SVG units)
-            const LEFT_LABEL_W = 220;
-            const RIGHT_LABEL_W = 260;
-            const BAR_W = 500;
-            const GAP = 2;
-            const MIN_BAR_H = 8;
-            const MAX_BAR_H = 80;
+            const esc = s => String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+            const rows = stackRows(stackupData);
 
-            // Scale thicknesses nonlinearly so very thin layers remain visible without
-            // dwarfing everything else. sqrt compresses the top end.
-            const total = stackupData.reduce((s, e) => s + Math.max(1e-5, e.thicknessMm), 0);
-            const scaleFor = t => {
-                const fraction = Math.max(1e-5, t) / total;
-                return Math.min(MAX_BAR_H, Math.max(MIN_BAR_H, Math.sqrt(fraction) * 180));
-            };
+            const copperMm = stackupData.filter(e => e.conductor).reduce((s, e) => s + e.thicknessMm, 0);
+            const dielectricMm = stackupData.filter(e => e.dielectric).reduce((s, e) => s + e.thicknessMm, 0);
+            const anyEstimated = stackupData.some(e => e.estimated);
 
-            const rows = stackupData.map(e => ({ ...e, h: scaleFor(e.thicknessMm) }));
-            const totalH = rows.reduce((s, r) => s + r.h + GAP, 0);
-            const VB_W = LEFT_LABEL_W + BAR_W + RIGHT_LABEL_W + 40;
-            const VB_H = totalH + 80;
-            const barX = LEFT_LABEL_W;
-
-            const escape = s => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
-
-            let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${VB_W} ${VB_H}" `
-                    + `style="width:100%;max-width:1100px;height:auto;display:block;margin:auto">`;
-
-            // Header
-            svg += `<text x="10" y="24" fill="var(--fg)" font-size="16" font-weight="600" font-family="sans-serif">PCB Layer Stackup</text>`;
-            svg += `<text x="${barX + BAR_W + 20}" y="24" fill="var(--fg-faint)" font-size="12" font-family="sans-serif" text-anchor="start">Estimated — matrix-derived</text>`;
-
-            let y = 48;
+            let html = '<div class="dp-spec-sheet">';
+            html += '<table class="dp-table dp-table--bare">';
+            html += '<colgroup><col class="dp-col-chip"><col class="dp-col-file"><col class="dp-col-material"><col></colgroup>';
+            html += '<thead>';
+            html += '<tr class="dp-table-title"><th colspan="4">Stack-up, materials, thickness and colours</th></tr>';
+            html += '<tr><th>Layer</th><th>File</th><th>Material / finish</th><th>Thickness</th></tr>';
+            html += '</thead><tbody>';
             for (const r of rows) {
-                const col = STACKUP_COLORS[r.type] || { fill: '#555', stroke: '#222' };
-                const hatch = r.dielectric ? ' fill-opacity="0.85"' : '';
-
-                // Bar
-                svg += `<rect x="${barX}" y="${y.toFixed(1)}" width="${BAR_W}" height="${r.h.toFixed(1)}" `
-                     + `fill="${col.fill}" stroke="${col.stroke}" stroke-width="1"${hatch} `
-                     + `data-name="${escape(r.name)}" data-type="${escape(r.type)}"/>`;
-
-                // Left label: name + type
-                const midY = y + r.h / 2 + 4;
-                svg += `<text x="${barX - 8}" y="${midY.toFixed(1)}" fill="var(--fg)" font-size="12" `
-                     + `font-family="sans-serif" text-anchor="end">${escape(r.name)}</text>`;
-                svg += `<text x="${barX - 8}" y="${(midY + 13).toFixed(1)}" fill="var(--fg-faint)" font-size="10" `
-                     + `font-family="sans-serif" text-anchor="end">${escape(r.type)}${r.side && r.side !== 'NEITHER' ? ' · ' + escape(r.side) : ''}</text>`;
-
-                // Right label: thickness + material + dk/df for dielectrics
-                let right = r.thicknessMm > 0
-                    ? r.thicknessMm.toFixed(r.thicknessMm < 0.01 ? 4 : 3) + ' mm'
-                    : '— mm';
-                const rightFaint = [];
-                if (r.material) rightFaint.push(escape(r.material));
-                if (r.dielectricConstant != null) rightFaint.push('Dk=' + r.dielectricConstant);
-                if (r.lossTangent != null) rightFaint.push('Df=' + r.lossTangent);
-                if (r.copperWeightOz != null) rightFaint.push(r.copperWeightOz + ' oz');
-
-                svg += `<text x="${barX + BAR_W + 8}" y="${midY.toFixed(1)}" fill="var(--fg)" font-size="12" `
-                     + `font-family="sans-serif">${right}</text>`;
-                svg += `<text x="${barX + BAR_W + 8}" y="${(midY + 13).toFixed(1)}" fill="var(--fg-faint)" font-size="10" `
-                     + `font-family="sans-serif">${rightFaint.join(' · ')}</text>`;
-
-                y += r.h + GAP;
+                const chipClass = ['dp-chip', r.swatch ? '' : 'dp-chip--plain',
+                                   r.light ? 'dp-chip--light' : '', r.thick ? 'dp-chip--thick' : '']
+                                  .filter(Boolean).join(' ');
+                const chipStyle = r.swatch ? ' style="--dp-swatch:' + r.swatch + '"' : '';
+                const thicknessClass = 'dp-stack-meta' + (r.estimated ? ' dp-stack-est' : '');
+                const thicknessTitle = r.estimated ? ' title="Industry-typical value; the archive does not state it"' : '';
+                html += '<tr>';
+                html += '<td><span class="' + chipClass + '"' + chipStyle + '>' + esc(r.name) + '</span></td>';
+                html += '<td class="dp-stack-meta dp-stack-file">' + esc(r.file) + '</td>';
+                html += '<td class="dp-stack-meta">' + esc(r.material) + '</td>';
+                html += '<td class="' + thicknessClass + '"' + thicknessTitle + '>'
+                      + (r.estimated ? '≈ ' : '') + esc(r.thickness) + '</td>';
+                html += '</tr>';
             }
-
-            // Total thickness footer
-            svg += `<line x1="${barX}" y1="${(y + 8).toFixed(1)}" x2="${barX + BAR_W}" y2="${(y + 8).toFixed(1)}" `
-                 + `stroke="var(--border)" stroke-width="1"/>`;
-            svg += `<text x="${barX - 8}" y="${(y + 28).toFixed(1)}" fill="var(--fg)" font-size="13" `
-                 + `font-weight="600" font-family="sans-serif" text-anchor="end">Total thickness</text>`;
-            svg += `<text x="${barX + BAR_W + 8}" y="${(y + 28).toFixed(1)}" fill="var(--fg)" font-size="13" `
-                 + `font-weight="600" font-family="sans-serif">${stackupTotalMm.toFixed(3)} mm</text>`;
-
-            svg += `</svg>`;
-            dataPanel.innerHTML = '<div style="padding:20px;">' + svg + '</div>';
+            html += '</tbody></table>';
+            html += '<div class="dp-stack-total">';
+            html += '<span>Stack sum (' + esc(formatLengthMm(copperMm)) + ' copper + '
+                  + esc(formatLengthMm(dielectricMm)) + ' dielectric): '
+                  + esc(formatLengthMm(copperMm + dielectricMm)) + '</span>';
+            html += '<span>All layers incl. mask and legend: ' + esc(formatLengthMm(stackupTotalMm)) + '</span>';
+            html += '</div>';
+            if (anyEstimated) {
+                html += '<div class="dp-stack-note">≈ industry-typical value — the archive does not state this thickness.</div>';
+            }
+            html += '</div>';
+            dataPanel.innerHTML = html;
         }
 
         // ===== BOM + centroid combined view =====
@@ -1038,7 +1454,7 @@
             const sortIndicator = key =>
                 bomSortKey === key ? (bomSortDir > 0 ? ' ▲' : ' ▼') : '';
 
-            let html = '';
+            let html = '<div class="bom-view">';
             html += '<div class="bom-toolbar">';
             html += `<span class="bom-summary">${rows.length} of ${billData.length} parts · ${totalRefdes} placed components</span>`;
             html += `<input class="bom-search" type="search" placeholder="Filter parts, refdes, descriptions…" value="${escape(bomFilter)}" oninput="bomFilter=this.value;renderBom();this.focus()">`;
@@ -1073,21 +1489,17 @@
                 html += `<td class="num">${r.quantity || (r.refdesList?.length ?? 0)}</td>`;
                 html += '<td class="refdes-cell">';
                 for (const p of r.refdesList || []) {
-                    const tt = `${p.refdes} · ${p.side || '—'} · `
-                            + `${(p.xMm ?? 0).toFixed(3)}, ${(p.yMm ?? 0).toFixed(3)} mm · `
-                            + `rot ${p.rotation ?? 0}° · mirror ${p.mirror || '—'}`;
                     const cls = 'refdes-pill side-' + (p.side || 'NEITHER').toLowerCase();
-                    html += `<span class="${cls}" `
-                          + `data-x="${p.xMm}" data-y="${p.yMm}" data-rot="${p.rotation}" `
-                          + `data-side="${p.side}" data-mirror="${p.mirror}" `
-                          + `title="${escape(tt)}">${escape(p.refdes)}</span>`;
+                    html += `<span class="${cls}" data-refdes="${escape(p.refdes)}">${escape(p.refdes)}</span>`;
                 }
                 html += '</td>';
                 html += `<td class="description" title="${escape(r.description)}">${escape(r.description)}</td>`;
                 html += '</tr>';
             }
-            html += '</tbody></table></div>';
+            html += '</tbody></table></div></div>';
             dataPanel.innerHTML = html;
+            hoveredPill = null;
+            hideHoverCard();
         }
 
         // ===== Layer list =====
@@ -1228,7 +1640,68 @@
         function updateTransform() {
             svgContent.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
             zoomLevel.textContent = Math.round(scale * 100) + '%';
+            updateGrid();
         }
+
+        /**
+         * Keep the backdrop grid on the board's own scale: one square is 10 mm of PCB, wherever
+         * the view is panned or zoomed to. The rendered SVG is sized in millimetres, so a
+         * millimetre is PX_PER_MM CSS pixels before the pan/zoom transform and PX_PER_MM * scale
+         * after it; the pan offset is in the same coordinates the grid's background-position uses,
+         * both measured from the viewer's top-left, so the grid tracks the artwork exactly.
+         *
+         * The lines are painted by the container rather than inside the transformed element on
+         * purpose — scaled with the content they would thicken and blur as you zoom in.
+         */
+        function updateGrid() {
+            const cell = GRID_MM * PX_PER_MM * scale;
+            viewerContainer.style.backgroundSize = `${cell}px ${cell}px`;
+            viewerContainer.style.backgroundPosition = `${panX}px ${panY}px`;
+        }
+
+        // ===== Version badge =====
+        // The server fills the badge from version.properties as it renders the page; a build
+        // without a filtered version leaves it empty, and then there is nothing honest to show.
+        (function showVersion() {
+            const el = document.getElementById('app-version');
+            if (!el) return;
+            const v = el.textContent.trim();
+            if (!v || v.startsWith('$')) el.style.display = 'none';
+            else el.textContent = v.startsWith('v') ? v : 'v' + v;
+        })();
+
+        // ===== Sidebar resize =====
+        (function initSidebarResize() {
+            const sidebar = document.querySelector('.sidebar');
+            const resizer = document.getElementById('sidebar-resizer');
+            const MIN = 180, MAX = 600;
+            const stored = parseInt(localStorage.getItem('odbpp-viewer-sidebar-width'), 10);
+            if (!isNaN(stored) && stored >= MIN && stored <= MAX) {
+                sidebar.style.width = stored + 'px';
+            }
+            let dragging = false;
+            resizer.addEventListener('mousedown', (e) => {
+                dragging = true;
+                resizer.classList.add('dragging');
+                document.body.classList.add('resizing-sidebar');
+                e.preventDefault();
+            });
+            document.addEventListener('mousemove', (e) => {
+                if (!dragging) return;
+                const rect = sidebar.getBoundingClientRect();
+                let w = e.clientX - rect.left;
+                if (w < MIN) w = MIN;
+                if (w > MAX) w = MAX;
+                sidebar.style.width = w + 'px';
+            });
+            document.addEventListener('mouseup', () => {
+                if (!dragging) return;
+                dragging = false;
+                resizer.classList.remove('dragging');
+                document.body.classList.remove('resizing-sidebar');
+                localStorage.setItem('odbpp-viewer-sidebar-width', parseInt(sidebar.style.width, 10));
+            });
+        })();
 
         // ===== UI helpers =====
         function showFileInfo(filename, stepCount) {

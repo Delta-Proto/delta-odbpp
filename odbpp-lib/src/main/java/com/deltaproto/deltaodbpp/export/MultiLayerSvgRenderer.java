@@ -718,8 +718,12 @@ public class MultiLayerSvgRenderer {
             // soldermask features black (mask absent = underlying copper/gold shows through)
             writer.write(String.format("  <mask id=\"%s\" maskContentUnits=\"userSpaceOnUse\">\n", smMaskId));
             writer.write(String.format("    <path d=\"%s\" fill=\"white\"/>\n", profilePath));
+            // stroke-width="0" matters: pad symbols emit fill-only elements, so a bare
+            // stroke here would inherit the SVG default width of 1 user unit — a 1 mm halo
+            // around every opening in a mm-scaled render, merging neighbouring pads into
+            // one big bare patch.
             for (LayerInfo info : soldermaskLayers) {
-                writer.write("    <g fill=\"black\" stroke=\"black\">\n");
+                writer.write("    <g fill=\"black\" stroke=\"black\" stroke-width=\"0\">\n");
                 renderLayerFeaturesRealistic(info.layer.getFeatures(), writer, "black", "white");
                 writer.write("    </g>\n");
             }
@@ -730,7 +734,7 @@ public class MultiLayerSvgRenderer {
             writer.write(String.format("  <mask id=\"%s\" maskContentUnits=\"userSpaceOnUse\">\n", cfMaskId));
             writer.write(String.format("    <rect %s fill=\"black\"/>\n", fullRect));
             for (LayerInfo info : soldermaskLayers) {
-                writer.write("    <g fill=\"white\" stroke=\"white\">\n");
+                writer.write("    <g fill=\"white\" stroke=\"white\" stroke-width=\"0\">\n");
                 renderLayerFeaturesRealistic(info.layer.getFeatures(), writer, "white", "black");
                 writer.write("    </g>\n");
             }
@@ -1040,22 +1044,38 @@ public class MultiLayerSvgRenderer {
             double cy = baseOptions.toOutputUnit(c.getY());
             boolean mirrored = c.getMirror() == MirrorType.MIRRORED;
 
-            // Package bounds: prefer EDA record if available, else a default stub.
-            double halfW;
-            double halfH;
+            // Silhouette: the EDA package outline when the writer gave one, else the package
+            // bounding box at its own offsets from the placement origin, else a default stub.
+            // The outline comes first because some writers (KiCad) grow the bounding box to
+            // cover the footprint's reference/value text, making parts look several times
+            // their real size.
+            String shape;
             EdaData.PackageRecord pkg = lookupPackage(packages, c.getPkgRef());
-            if (pkg != null) {
-                halfW = baseOptions.toOutputUnit((pkg.getXMax() - pkg.getXMin()) / 2.0);
-                halfH = baseOptions.toOutputUnit((pkg.getYMax() - pkg.getYMin()) / 2.0);
-                if (halfW <= 0 || halfH <= 0) {
-                    halfW = Math.max(halfW, vbW * 0.01);
-                    halfH = Math.max(halfH, vbH * 0.012);
-                    packageFallbackCount++;
-                }
+            if (pkg != null && pkg.hasOutline()) {
+                shape = String.format(Locale.US,
+                        "<path d=\"%s\" fill=\"%s\" fill-rule=\"evenodd\" stroke=\"%s\" " +
+                                "stroke-width=\"0.5\" vector-effect=\"non-scaling-stroke\" " +
+                                "data-outline=\"contour\"/>",
+                        contourPathData(pkg.getOutline()), fill, stroke);
+            } else if (pkg != null && pkg.getWidth() > 0 && pkg.getHeight() > 0) {
+                double x0 = baseOptions.toOutputUnit(pkg.getXMin());
+                double y0 = baseOptions.toOutputUnit(pkg.getYMin());
+                double w = baseOptions.toOutputUnit(pkg.getWidth());
+                double h = baseOptions.toOutputUnit(pkg.getHeight());
+                shape = String.format(Locale.US,
+                        "<rect x=\"%.4f\" y=\"%.4f\" width=\"%.4f\" height=\"%.4f\" " +
+                                "fill=\"%s\" stroke=\"%s\" stroke-width=\"0.5\" " +
+                                "vector-effect=\"non-scaling-stroke\" data-outline=\"bbox\"/>",
+                        x0, y0, w, h, fill, stroke);
             } else {
-                halfW = vbW * 0.01;
-                halfH = vbH * 0.012;
+                double halfW = vbW * 0.01;
+                double halfH = vbH * 0.012;
                 packageFallbackCount++;
+                shape = String.format(Locale.US,
+                        "<rect x=\"%.4f\" y=\"%.4f\" width=\"%.4f\" height=\"%.4f\" " +
+                                "fill=\"%s\" stroke=\"%s\" stroke-width=\"0.5\" " +
+                                "vector-effect=\"non-scaling-stroke\" data-outline=\"fallback\"/>",
+                        -halfW, -halfH, 2 * halfW, 2 * halfH, fill, stroke);
             }
 
             String compTransform = String.format(Locale.US,
@@ -1068,23 +1088,23 @@ public class MultiLayerSvgRenderer {
                     compTransform,
                     escapeAttr(c.getCompName() == null ? "" : c.getCompName()),
                     c.getPkgRef()));
-            writer.write(String.format(Locale.US,
-                    "      <rect x=\"%.4f\" y=\"%.4f\" width=\"%.4f\" height=\"%.4f\" " +
-                            "fill=\"%s\" stroke=\"%s\" stroke-width=\"0.5\" " +
-                            "vector-effect=\"non-scaling-stroke\"/>\n",
-                    -halfW, -halfH, 2 * halfW, 2 * halfH, fill, stroke));
+            writer.write("      " + shape + "\n");
             writer.write("    </g>\n");
 
             // Refdes label — separate sibling group, outside the rotation/mirror transform so
-            // text stays upright. Counter-flip Y for the viewport transform.
+            // text stays upright. The label undoes the viewport's flip: Y only on the top side,
+            // X and Y on the bottom, whose viewport also mirrors X so the board reads as seen
+            // from behind. Either way the text lands on the component and reads left to right.
             String refdes = c.getCompName();
             if (refdes != null && !refdes.isEmpty()) {
+                String unflip = topSide ? "scale(1,-1)" : "scale(-1,-1)";
+                double lx = topSide ? cx : -cx;
                 writer.write(String.format(Locale.US,
                         "    <text x=\"%.4f\" y=\"%.4f\" font-size=\"%.4f\" fill=\"%s\" " +
                                 "text-anchor=\"middle\" font-family=\"sans-serif\" " +
-                                "transform=\"scale(1,-1) translate(0,%.4f)\" " +
+                                "transform=\"%s\" " +
                                 "data-refdes-label=\"%s\">%s</text>\n",
-                        cx, -cy, labelSize, COMP_LABEL_COLOR, 0.0,
+                        lx, -cy, labelSize, COMP_LABEL_COLOR, unflip,
                         escapeAttr(refdes), escapeAttr(refdes)));
             }
         }
@@ -1104,6 +1124,48 @@ public class MultiLayerSvgRenderer {
     private static EdaData.PackageRecord lookupPackage(List<EdaData.PackageRecord> packages, int pkgRef) {
         if (packages == null || pkgRef < 0 || pkgRef >= packages.size()) return null;
         return packages.get(pkgRef);
+    }
+
+    /**
+     * SVG path data for a list of contour polygons in model coordinates (mm), converted to the
+     * output unit. Islands and holes go into one path so an evenodd fill cuts the holes out.
+     * Arcs carry a proper large-arc flag, computed from the swept angle about the centre.
+     */
+    private String contourPathData(List<ContourPolygon> polygons) {
+        StringBuilder d = new StringBuilder();
+        for (ContourPolygon polygon : polygons) {
+            double px = polygon.getXStart();
+            double py = polygon.getYStart();
+            d.append(String.format(Locale.US, "M %.4f %.4f",
+                    baseOptions.toOutputUnit(px), baseOptions.toOutputUnit(py)));
+            for (ContourPolygon.PolygonPart part : polygon.getPolygonParts()) {
+                double ex = part.getEndX();
+                double ey = part.getEndY();
+                if (part.getType() == ContourPolygon.PolygonPart.Type.ARC) {
+                    double cx = part.getXCenter();
+                    double cy = part.getYCenter();
+                    double r = Math.hypot(ex - cx, ey - cy);
+                    double a0 = Math.atan2(py - cy, px - cx);
+                    double a1 = Math.atan2(ey - cy, ex - cx);
+                    // Swept angle in the direction of travel (model frame, Y up).
+                    double swept = part.isClockwise() ? a0 - a1 : a1 - a0;
+                    swept = ((swept % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+                    int largeArc = swept > Math.PI ? 1 : 0;
+                    // The viewport flips Y, so a clockwise model arc is drawn with sweep 0.
+                    int sweep = part.isClockwise() ? 0 : 1;
+                    d.append(String.format(Locale.US, " A %.4f %.4f 0 %d %d %.4f %.4f",
+                            baseOptions.toOutputUnit(r), baseOptions.toOutputUnit(r), largeArc, sweep,
+                            baseOptions.toOutputUnit(ex), baseOptions.toOutputUnit(ey)));
+                } else {
+                    d.append(String.format(Locale.US, " L %.4f %.4f",
+                            baseOptions.toOutputUnit(ex), baseOptions.toOutputUnit(ey)));
+                }
+                px = ex;
+                py = ey;
+            }
+            d.append(" Z");
+        }
+        return d.toString();
     }
 
     // ------------------------------------------------------------------

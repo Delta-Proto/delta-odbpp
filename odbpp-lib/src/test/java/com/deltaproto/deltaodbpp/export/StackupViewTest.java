@@ -128,6 +128,26 @@ class StackupViewTest {
         }
     }
 
+    /**
+     * The matrix's {@code DIELECTRIC_TYPE} rides along on dielectric entries so a UI can say
+     * "prepreg" or "core" next to the laminate; a row that omits it, and every non-dielectric,
+     * gets null rather than a guess.
+     */
+    @Test
+    void dielectricType_comesFromTheMatrixWhenStated() throws IOException {
+        Job job = new com.deltaproto.deltaodbpp.parser.OdbParser().parse(Fixtures.STACKUP_ATTRLIST_MM);
+        List<StackupView.Entry> entries = StackupView.build(job);
+        java.util.Map<String, StackupView.Entry> byName = new java.util.HashMap<>();
+        for (StackupView.Entry e : entries) byName.put(e.name.toLowerCase(java.util.Locale.ROOT), e);
+
+        assertEquals("PREPREG", byName.get("dielectric_1").dielectricType);
+        assertEquals("CORE", byName.get("dielectric_2").dielectricType);
+        assertNull(byName.get("dielectric_3").dielectricType, "row without DIELECTRIC_TYPE");
+        for (StackupView.Entry e : entries) {
+            if (!e.dielectric) assertNull(e.dielectricType, e.name + " is not a dielectric");
+        }
+    }
+
     @Test
     void build_drillsAndComponentsAndDocuments_excluded() {
         for (StackupView.Entry e : stackup) {

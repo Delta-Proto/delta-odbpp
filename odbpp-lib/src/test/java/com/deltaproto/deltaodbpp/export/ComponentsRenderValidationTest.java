@@ -134,6 +134,24 @@ class ComponentsRenderValidationTest {
                 "expected a non-trivial number of bottom components, got " + refdesRendered);
     }
 
+    /**
+     * The sample writes an {@code RC} outline for every package, so every silhouette should be
+     * drawn from it rather than from the bounding box or the size-less fallback stub.
+     */
+    @Test
+    void silhouettes_comeFromThePackageOutline() {
+        int contour = 0, other = 0;
+        NodeList all = topDoc.getElementsByTagNameNS("*", "*");
+        for (int i = 0; i < all.getLength(); i++) {
+            String kind = ((Element) all.item(i)).getAttribute("data-outline");
+            if (kind.isEmpty()) continue;
+            if ("contour".equals(kind)) contour++; else other++;
+        }
+        assertTrue(contour > 10, "expected outline-based silhouettes, got " + contour);
+        assertEquals(0, other, "every package in the sample carries an outline");
+        assertFalse(topSvg.contains("used fallback outline"));
+    }
+
     @Test
     void topSvg_refdesLabelTextMatchesAttribute() {
         // Component groups should be accompanied by matching label text.

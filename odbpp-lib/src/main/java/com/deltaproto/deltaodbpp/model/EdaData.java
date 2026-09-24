@@ -1,6 +1,7 @@
 package com.deltaproto.deltaodbpp.model;
 
 import lombok.Data;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -42,6 +43,21 @@ public class EdaData {
         private List<PinRecord> pinRecords;
         private Map<String, PinRecord> pinRecordsByName;
         private Map<String, String> attributes;
+        /**
+         * The package body outline in the package-local frame (mm after parsing), as the
+         * {@code RC} / {@code CR} / {@code SQ} / {@code CT} record(s) that follow the
+         * {@code PKG} line describe it. Empty when the writer gave none.
+         *
+         * <p>Prefer this over the bounding box for drawing: some writers (KiCad among them)
+         * grow {@code xmin..ymax} to cover the footprint's reference and value text, so the
+         * box can be many times the size of the part while the outline stays true to it.
+         */
+        private List<ContourPolygon> outline = new ArrayList<>();
+
+        /** Whether the record carries an outline (see {@link #getOutline()}). */
+        public boolean hasOutline() {
+            return outline != null && !outline.isEmpty();
+        }
 
         /** Bounding-box width in the record's units (mm after parsing). */
         public double getWidth() {

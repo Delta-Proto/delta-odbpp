@@ -143,6 +143,31 @@ class RealisticRenderValidationTest {
                 "copper-finish mask (cf-top-mask) missing — gold pads won't show");
     }
 
+    /**
+     * Pad symbols render as fill-only elements, so any {@code stroke} set on a mask group must come
+     * with {@code stroke-width="0"}: left at the SVG default of 1 user unit it would halo every
+     * soldermask opening by 1 mm in a millimetre render, merging neighbouring pads into one bare
+     * patch of substrate (seen on a KiCad export whose QFN and module pad rows fused into grey
+     * blocks).
+     */
+    @Test
+    void maskGroups_neverInheritTheDefaultStrokeWidth() {
+        for (String id : new String[] {"sm-top-mask", "cf-top-mask", "mech-mask"}) {
+            Element mask = findById(topDoc, id);
+            assertNotNull(mask, id + " missing");
+            NodeList groups = mask.getElementsByTagNameNS("*", "g");
+            assertTrue(groups.getLength() > 0, id + " should hold at least one layer group");
+            for (int i = 0; i < groups.getLength(); i++) {
+                Element g = (Element) groups.item(i);
+                if (!g.getAttribute("stroke").isEmpty() && !"none".equals(g.getAttribute("stroke"))) {
+                    assertEquals("0", g.getAttribute("stroke-width"),
+                            id + ": a group with stroke=" + g.getAttribute("stroke")
+                                    + " must set stroke-width=\"0\"");
+                }
+            }
+        }
+    }
+
     @Test
     void topSvg_hasDrillCutoutMask() {
         // The sample has drill layers, so a mechanical cutout mask should punch
