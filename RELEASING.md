@@ -59,8 +59,10 @@ Add the following to your `~/.m2/settings.xml`:
 
 ### 1. Update Version
 
-Ensure the version in the root `pom.xml` is set to the release version (without
-`-SNAPSHOT`). The version is inherited by every module:
+`main` always carries a `-SNAPSHOT` version; a release strips it in a commit of
+its own and the very next commit moves `main` to the following snapshot (see
+[DEPLOY.md](DEPLOY.md)). Set the release version in the root `pom.xml` **and**
+in the `<parent>` block of `odbpp-lib/pom.xml` and `odbpp-app/pom.xml`:
 
 ```xml
 <version>1.0.0</version>
@@ -96,10 +98,9 @@ git push origin v1.0.0
 
 ### 5. Prepare Next Development Version
 
-```bash
-# Update the root pom.xml to the next SNAPSHOT version
-# Example: 1.0.1-SNAPSHOT
-```
+Required, immediately after tagging: set the next `-SNAPSHOT` version in all
+three poms (example: `1.0.1-SNAPSHOT`), commit as `Start 1.0.1-SNAPSHOT` and
+push. `main` must not sit on a released version number.
 
 ## Local Testing
 
