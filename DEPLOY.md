@@ -77,4 +77,4 @@ git push origin main
 
 Anything that runs the web application from source against the local Maven
 repository (for example `mvn spring-boot:run` in `odbpp-app/`) now needs the
-snapshot library installed: `mvn install -DskipTests -pl odbpp-lib`.
+snapshot library and parent pom installed: `mvn install -DskipTests -pl odbpp-lib -am`.
