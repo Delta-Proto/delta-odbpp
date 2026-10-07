@@ -9,30 +9,33 @@ import com.deltaproto.deltaodbpp.model.Tool;
 import com.deltaproto.deltaodbpp.model.Tools;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * Converts an ODB++ drill layer into an Excellon (XNC-style) drill file.
  *
  * <ul>
- *   <li>Pad features become drill hits (X/Y).</li>
- *   <li>Line features are slots, emitted as canonical G85 slot records —
- *       the representation fabs and CAM tools universally accept.</li>
+ *   <li>Round pad features become drill hits (X/Y).</li>
+ *   <li>Oval (and, approximately, rectangular) pad features are slots: the
+ *       hole is the symbol's smaller dimension and the slot runs along its
+ *       longer axis, honouring the pad rotation. Line features are slots too.
+ *       Slots are emitted as canonical G85 records — the representation fabs
+ *       and CAM tools universally accept.</li>
  *   <li>Arc features (curved milling) have no Excellon arc-slot equivalent,
  *       so they are tessellated into chains of short G85 slots with a
  *       0.01&nbsp;mm chord tolerance. A full circle (start == end) is a
  *       milled circular cutout and is tessellated likewise.</li>
  * </ul>
  *
- * Coordinates are emitted in mm with explicit decimal points, which removes
- * all leading/trailing-zero ambiguity.
- *
- * Tool numbers reuse the layer's tools file (matched by diameter) so the
- * output cross-references the ODB++ source; features whose diameter has no
- * tools-file entry get newly allocated numbers.
+ * Tools are numbered T1.. in ascending diameter order, one per distinct
+ * diameter, the way every EDA drill writer does it; the ODB++ tools file only
+ * contributes the tool <em>kind</em> (via vs. component hole) for the X2
+ * {@code TA.AperFunction} attribute comments. Coordinates are emitted in mm
+ * with explicit decimal points, which removes all leading/trailing-zero
+ * ambiguity.
  */
 public class ExcellonWriter {
 
@@ -55,50 +58,65 @@ public class ExcellonWriter {
     }
 
     public Result export(Features features, Tools tools) {
+        return export(features, tools, null);
+    }
+
+    /**
+     * @param fileFunction the Gerber X2 style drill file function
+     *                     ({@code Plated,1,2,PTH} / {@code NonPlated,1,2,NPTH}),
+     *                     written as attribute comments; null omits them
+     */
+    public Result export(Features features, Tools tools, String fileFunction) {
         List<String> warnings = new ArrayList<>();
         double unitToMm = features.isMillimeters() ? 0.001 : 0.0254;
 
-        // diameter (rounded) -> tool number and its operations
-        Map<Long, Integer> toolNumberByDiameter = new LinkedHashMap<>();
-        Map<Integer, Double> diameterByToolNumber = new LinkedHashMap<>();
-        Map<Integer, StringBuilder> opsByToolNumber = new LinkedHashMap<>();
-        int nextSynthetic = nextSyntheticToolNumber(tools);
-
+        // diameter key -> operations, ascending diameter
+        Map<Long, StringBuilder> opsByDiameter = new TreeMap<>();
+        Map<Long, Double> diameterByKey = new TreeMap<>();
         int holes = 0;
         int slots = 0;
 
         for (Feature feature : features.getFeatures()) {
-            double diameter;
+            int symbolNumber;
             if (feature instanceof Pad pad) {
-                diameter = featureDiameter(features, pad.getSymbolNumber(), unitToMm, warnings);
+                symbolNumber = pad.getSymbolNumber();
             } else if (feature instanceof Line line) {
-                diameter = featureDiameter(features, line.getSymbolNumber(), unitToMm, warnings);
+                symbolNumber = line.getSymbolNumber();
             } else if (feature instanceof Arc arc) {
-                diameter = featureDiameter(features, arc.getSymbolNumber(), unitToMm, warnings);
+                symbolNumber = arc.getSymbolNumber();
             } else {
                 warnings.add("Non-drill feature " + feature.getClass().getSimpleName()
                         + " skipped in Excellon export");
                 continue;
             }
-
-            int toolNumber = toolNumberByDiameter.computeIfAbsent(diameterKey(diameter), k -> {
-                Integer fromToolsFile = matchToolsFile(tools, diameter);
-                int num = fromToolsFile != null ? fromToolsFile : -1;
-                return num;
-            });
-            if (toolNumber == -1) {
-                toolNumber = nextSynthetic++;
-                toolNumberByDiameter.put(diameterKey(diameter), toolNumber);
-                warnings.add(String.format(Locale.ROOT,
-                        "No tools-file entry for diameter %.4f mm; assigned T%d",
-                        diameter, toolNumber));
+            String symbolName = features.getSymbolName(symbolNumber);
+            OdbSymbolShape shape = OdbSymbolShape.parse(symbolName, unitToMm);
+            if (shape == null) {
+                warnings.add("Unsupported drill symbol '" + symbolName
+                        + "'; defaulting to 0.1 mm");
             }
-            diameterByToolNumber.putIfAbsent(toolNumber, diameter);
-            StringBuilder ops = opsByToolNumber.computeIfAbsent(toolNumber, k -> new StringBuilder());
+            double diameter = shape == null ? 0.1 : shape.strokeDiameter();
+            long key = diameterKey(diameter);
+            diameterByKey.putIfAbsent(key, diameter);
+            StringBuilder ops = opsByDiameter.computeIfAbsent(key, k -> new StringBuilder());
 
             if (feature instanceof Pad pad) {
-                ops.append('X').append(fmt(pad.getX())).append('Y').append(fmt(pad.getY())).append('\n');
-                holes++;
+                if (shape != null && isElongated(shape)) {
+                    double[] ends = slotEnds(pad, shape);
+                    appendSlot(ops, ends[0], ends[1], ends[2], ends[3]);
+                    slots++;
+                    if (shape.kind != OdbSymbolShape.Kind.OVAL) {
+                        warnings.add("Non-round drill symbol '" + symbolName
+                                + "' exported as a slot of width " + fmt(diameter) + " mm");
+                    }
+                } else {
+                    if (shape != null && shape.kind != OdbSymbolShape.Kind.ROUND) {
+                        warnings.add("Non-round drill symbol '" + symbolName
+                                + "' exported as a " + fmt(diameter) + " mm hole");
+                    }
+                    ops.append('X').append(fmt(pad.getX())).append('Y').append(fmt(pad.getY())).append('\n');
+                    holes++;
+                }
             } else if (feature instanceof Line line) {
                 appendSlot(ops, line.getXs(), line.getYs(), line.getXe(), line.getYe());
                 slots++;
@@ -107,23 +125,68 @@ public class ExcellonWriter {
             }
         }
 
+        boolean plated = fileFunction == null || !fileFunction.startsWith("NonPlated");
+
         StringBuilder out = new StringBuilder();
         out.append("M48\n");
+        out.append("; #@! TF.GenerationSoftware,DeltaProto,odbpp-lib,1.0\n");
+        if (fileFunction != null) {
+            out.append("; #@! TF.FileFunction,").append(fileFunction).append('\n');
+        }
+        out.append("FMAT,2\n");
         out.append("METRIC\n");
-        for (Map.Entry<Integer, Double> e : diameterByToolNumber.entrySet()) {
-            out.append('T').append(e.getKey()).append('C')
-                    .append(String.format(Locale.ROOT, "%.4f", e.getValue())).append('\n');
+        int toolNumber = 0;
+        for (Map.Entry<Long, Double> e : diameterByKey.entrySet()) {
+            toolNumber++;
+            if (fileFunction != null) {
+                out.append("; #@! TA.AperFunction,")
+                        .append(plated ? "Plated,PTH," : "NonPlated,NPTH,")
+                        .append(isVia(tools, e.getValue()) ? "ViaDrill" : "ComponentDrill")
+                        .append('\n');
+            }
+            out.append('T').append(toolNumber).append('C')
+                    .append(String.format(Locale.ROOT, "%.3f", e.getValue())).append('\n');
         }
         out.append("%\n");
         out.append("G90\n");
         out.append("G05\n");
-        for (Map.Entry<Integer, StringBuilder> e : opsByToolNumber.entrySet()) {
-            out.append('T').append(e.getKey()).append('\n');
+        toolNumber = 0;
+        for (Map.Entry<Long, StringBuilder> e : opsByDiameter.entrySet()) {
+            toolNumber++;
+            out.append('T').append(toolNumber).append('\n');
             out.append(e.getValue());
         }
         out.append("M30\n");
 
         return new Result(out.toString(), warnings, holes, slots);
+    }
+
+    private static boolean isElongated(OdbSymbolShape shape) {
+        return (shape.kind == OdbSymbolShape.Kind.OVAL || shape.kind == OdbSymbolShape.Kind.RECT
+                || shape.kind == OdbSymbolShape.Kind.ROUNDED_RECT
+                || shape.kind == OdbSymbolShape.Kind.CHAMFERED_RECT)
+                && Math.abs(shape.width - shape.height) > TOOL_MATCH_TOLERANCE_MM;
+    }
+
+    /** Slot end points {x1, y1, x2, y2} of an elongated pad, in its rotated frame. */
+    private static double[] slotEnds(Pad pad, OdbSymbolShape shape) {
+        double half = Math.abs(shape.width - shape.height) / 2;
+        double lx = shape.width > shape.height ? half : 0;
+        double ly = shape.width > shape.height ? 0 : half;
+        double rotCw = padRotationCw(pad);
+        double rad = Math.toRadians(-rotCw);
+        double dx = lx * Math.cos(rad) - ly * Math.sin(rad);
+        double dy = lx * Math.sin(rad) + ly * Math.cos(rad);
+        return new double[] {pad.getX() - dx, pad.getY() - dy, pad.getX() + dx, pad.getY() + dy};
+    }
+
+    /** orientationType 0-7 legacy (90° steps + mirror), 8/9 free rotation. */
+    private static double padRotationCw(Pad pad) {
+        int type = pad.getOrientationType();
+        if (type >= 8) {
+            return pad.getCustomRotation() != null ? pad.getCustomRotation() : 0;
+        }
+        return (type % 4) * 90.0;
     }
 
     private void appendSlot(StringBuilder ops, double xs, double ys, double xe, double ye) {
@@ -181,43 +244,18 @@ public class ExcellonWriter {
         return segments;
     }
 
-    private double featureDiameter(Features features, int symbolNumber,
-                                   double unitToMm, List<String> warnings) {
-        String symbolName = features.getSymbolName(symbolNumber);
-        OdbSymbolShape shape = OdbSymbolShape.parse(symbolName, unitToMm);
-        if (shape == null) {
-            warnings.add("Unsupported drill symbol '" + symbolName
-                    + "'; defaulting to 0.1 mm");
-            return 0.1;
-        }
-        if (shape.kind != OdbSymbolShape.Kind.ROUND) {
-            warnings.add("Non-round drill symbol '" + symbolName
-                    + "' uses its stroke diameter " + shape.strokeDiameter() + " mm");
-        }
-        return shape.strokeDiameter();
-    }
-
-    private Integer matchToolsFile(Tools tools, double diameter) {
+    /** Whether the tools file declares any tool of this diameter as a via. */
+    private static boolean isVia(Tools tools, double diameter) {
         if (tools == null || tools.getTools() == null) {
-            return null;
+            return false;
         }
         for (Tool tool : tools.getTools()) {
-            if (tool.getFinishSize() > 0
+            if (tool.getType() == Tool.ToolType.VIA && tool.getFinishSize() > 0
                     && Math.abs(tool.getFinishSize() - diameter) <= TOOL_MATCH_TOLERANCE_MM) {
-                return tool.getNum();
+                return true;
             }
         }
-        return null;
-    }
-
-    private int nextSyntheticToolNumber(Tools tools) {
-        int max = 0;
-        if (tools != null && tools.getTools() != null) {
-            for (Tool tool : tools.getTools()) {
-                max = Math.max(max, tool.getNum());
-            }
-        }
-        return max + 1;
+        return false;
     }
 
     private static long diameterKey(double diameter) {

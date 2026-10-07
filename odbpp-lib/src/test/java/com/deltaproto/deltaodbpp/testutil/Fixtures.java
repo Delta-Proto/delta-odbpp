@@ -61,6 +61,26 @@ public final class Fixtures {
     /** Synthetic two-layer (top + bottom) board archive. */
     public static final Path MINIMAL_TEST_ODB_ZIP = RESOURCES.resolve("minimal-test-odb.zip");
 
+    /**
+     * Private, gitignored test data under {@code <repo>/testdata}. Nothing in there is ever
+     * committed; tests that need it must skip (JUnit assumption) when it is absent.
+     */
+    public static final Path PRIVATE_TESTDATA = Paths.get("..", "testdata");
+    /**
+     * Boards exported both as ODB++ and, from the same EDA project, as a Gerber + Excellon
+     * fabrication set: one directory per board holding {@code odb/} (the exploded archive),
+     * {@code gerber/} (the reference files, renamed to the converter's own output names, e.g.
+     * {@code F_Cu.gtl}, {@code In1_Cu.g1}, {@code Edge_Cuts.gm1}, {@code PTH.drl}) and an
+     * {@code options.properties} with the converter options the EDA tool's plot used. The
+     * references for {@code GerberReferenceTest}.
+     */
+    public static final Path GERBER_REFERENCE_SETS = PRIVATE_TESTDATA.resolve("gerber-reference");
+
+    /** Whether a private fixture directory is present on this machine. */
+    public static boolean hasPrivate(Path fixture) {
+        return Files.isDirectory(fixture);
+    }
+
     /** Rich openly-available multilayer sample (rigid-flex, with components + EDA). */
     public static final String MULTILAYER_SAMPLE = "designodb_rigidflex.tgz";
     /** Small openly-available sample. */

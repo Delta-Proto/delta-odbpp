@@ -19,7 +19,7 @@ public class FeaturesFileParser {
     // Pad format: P x y apt_def [P|N] orient [dcode] [;attr=val...]
     // Extra fields may be present, so don't require $ at end
     private static final Pattern PAD_PATTERN = Pattern.compile(
-            "^P\\s+" + COORD + "\\s+" + COORD + "\\s+(\\d+)\\s+([PN])\\s+(\\d+)(?:\\s+(\\d+))?(?:.*?;(.*))?");
+            "^P\\s+" + COORD + "\\s+" + COORD + "\\s+(\\d+)\\s+([PN])((?:\\s+-?[0-9.]+)*)(?:.*?;(.*))?");
     // Line format: L xs ys xe ye apt_def [P|N] [dcode] [;attr=val...]
     private static final Pattern LINE_PATTERN = Pattern.compile(
             "^L\\s+" + COORD + "\\s+" + COORD + "\\s+" + COORD + "\\s+" + COORD + "\\s+(\\d+)(?:\\s+([PN]))?(?:\\s+(\\d+))?(?:.*?;(.*))?");
@@ -218,22 +218,32 @@ public class FeaturesFileParser {
             // Polarity is in group 4
             String polarity = matcher.group(4);
             pad.setPolarity(polarity);
-            // Orientation is in group 5 - store as orientationType (0-7) or custom rotation (8/9)
-            double rotation = Double.parseDouble(matcher.group(5));
-            if (rotation < 8) {
-                pad.setOrientationType((int) rotation);
-            } else {
-                pad.setOrientationType((int) rotation);
-                pad.setCustomRotation(rotation);
+            // Spec: P x y sym_num polarity dcode orient_def, where orient_def is
+            // 0-7 (90-degree steps, 4-7 mirrored) or "8 <angle>" / "9 <angle>"
+            // (free clockwise rotation, 9 mirrored). Group 5 holds the numeric
+            // tail; a single number is taken as the orient_def (dcode omitted).
+            String[] tail = matcher.group(5).trim().isEmpty()
+                    ? new String[0] : matcher.group(5).trim().split("\\s+");
+            String orient = "0";
+            String angle = null;
+            if (tail.length == 1) {
+                orient = tail[0];
+            } else if (tail.length >= 2) {
+                pad.setDcode((int) Double.parseDouble(tail[0]));
+                orient = tail[1];
+                if (tail.length >= 3) {
+                    angle = tail[2];
+                }
             }
-            // Dcode in group 6 (optional)
+            int orientationType = (int) Double.parseDouble(orient);
+            pad.setOrientationType(orientationType);
+            if (orientationType >= 8) {
+                pad.setCustomRotation(angle != null ? Double.parseDouble(angle) : 0.0);
+            }
+            // Attributes in group 6 (optional)
             if (matcher.group(6) != null) {
-                pad.setDcode(Integer.parseInt(matcher.group(6)));
-            }
-            // Attributes in group 7 (optional)
-            if (matcher.group(7) != null) {
                 StringBuilder uniqueId = new StringBuilder();
-                parseAttributes(matcher.group(7), pad.getAttributes(), uniqueId);
+                parseAttributes(matcher.group(6), pad.getAttributes(), uniqueId);
                 if (uniqueId.length() > 0) {
                     pad.setUniqueId(uniqueId.toString());
                 }

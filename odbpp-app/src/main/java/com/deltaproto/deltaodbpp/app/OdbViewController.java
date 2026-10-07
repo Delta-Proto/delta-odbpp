@@ -6,6 +6,7 @@ import com.deltaproto.deltaodbpp.export.MultiLayerSvgRenderer;
 import com.deltaproto.deltaodbpp.export.SoldermaskColor;
 import com.deltaproto.deltaodbpp.export.StackupView;
 import com.deltaproto.deltaodbpp.export.SvgRenderOptions;
+import com.deltaproto.deltaodbpp.export.gerber.OdbToGerberConverter;
 import com.deltaproto.deltaodbpp.model.Job;
 import com.deltaproto.deltaodbpp.model.Matrix;
 import com.deltaproto.deltaodbpp.model.MatrixLayer;
@@ -37,6 +38,8 @@ import java.util.*;
  *   <li>POST /api/odbpp/render     — receives ODB++ archive, returns multi-layer + realistic SVGs</li>
  *   <li>POST /api/odbpp/thumbnail  — receives ODB++ archive, returns a rasterised PNG
  *       of one realistic side view (query: side=top|bottom, width, height)</li>
+ *   <li>POST /api/odbpp/gerber     — receives ODB++ archive, returns a zip of the
+ *       converted Gerber X2 + Excellon fabrication set</li>
  * </ul>
  *
  * <p>API endpoints carry {@code @CrossOrigin} so the UI can be served from the
@@ -248,6 +251,72 @@ public class OdbViewController {
             logger.error("Thumbnail generation failed for {}", filename, e);
             return ResponseEntity.internalServerError()
                     .body(("Thumbnail failed: " + e.getMessage()).getBytes());
+        } finally {
+            cleanup(tempFile);
+            cleanup(extractDir);
+        }
+    }
+
+    /**
+     * Gerber export endpoint. Converts the uploaded archive's first step to a
+     * Gerber X2 + Excellon fabrication set and returns it as one zip.
+     *
+     * @param file the archive (same formats accepted by /render)
+     * @param subtractSoldermaskFromLegend clear soldermask openings out of the legend layers
+     */
+    @PostMapping(value = "/api/odbpp/gerber", produces = "application/zip")
+    @ResponseBody
+    public ResponseEntity<byte[]> gerber(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "subtractSoldermaskFromLegend", defaultValue = "false")
+            boolean subtractSoldermaskFromLegend) {
+
+        if (file.isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body("Please select a file to upload".getBytes());
+        }
+        String filename = file.getOriginalFilename();
+        if (filename == null || !isValidArchive(filename)) {
+            return ResponseEntity.badRequest()
+                    .body("Invalid archive format".getBytes());
+        }
+        String base = filename.replaceAll("(?i)\\.(zip|tgz|tar\\.gz)$", "");
+
+        Path tempFile = null;
+        Path extractDir = null;
+        try {
+            long startTime = System.currentTimeMillis();
+            tempFile = Files.createTempFile("odbpp_gerber_", getExtension(filename));
+            file.transferTo(tempFile.toFile());
+            extractDir = Files.createTempDirectory("odbpp_gerber_ext_");
+            Path odbRoot = extractor.extract(tempFile, extractDir);
+            Job job = parser.parse(odbRoot);
+
+            OdbToGerberConverter.Result result = new OdbToGerberConverter()
+                    .setSubtractSoldermaskFromLegend(subtractSoldermaskFromLegend)
+                    .setFileNamePrefix(base + "-")
+                    .convert(job);
+            if (result.files.isEmpty()) {
+                return ResponseEntity.unprocessableEntity()
+                        .body(("No fabrication layers found: " + result.warnings).getBytes());
+            }
+            byte[] zip = result.toZip();
+
+            long elapsed = System.currentTimeMillis() - startTime;
+            logger.info("Gerber export of {} in {}ms ({} files, {} warnings, {} bytes)",
+                    filename, elapsed, result.files.size(), result.warnings.size(), zip.length);
+            result.warnings.forEach(w -> logger.warn("Gerber export {}: {}", filename, w));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.parseMediaType("application/zip"));
+            headers.setContentDispositionFormData("attachment", base + "-gerber.zip");
+            headers.setCacheControl("no-store");
+            return ResponseEntity.ok().headers(headers).body(zip);
+
+        } catch (Exception e) {
+            logger.error("Gerber export failed for {}", filename, e);
+            return ResponseEntity.internalServerError()
+                    .body(("Gerber export failed: " + e.getMessage()).getBytes());
         } finally {
             cleanup(tempFile);
             cleanup(extractDir);

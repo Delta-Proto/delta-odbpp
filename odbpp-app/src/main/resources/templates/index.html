@@ -531,6 +531,16 @@
                     <button class="sm-swatch"        data-color="black"  style="background:#0f1010" onclick="setSoldermask('black')"  title="Black"></button>
                 </span>
                 <span style="flex:1"></span>
+                <button class="view-tab" id="gerber-btn" onclick="downloadGerber()" disabled
+                    title="Convert to Gerber X2 + Excellon and download as zip">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    <span>Gerber</span>
+                </button>
                 <button class="view-tab" id="png-top-btn" onclick="downloadThumbnail('top')" disabled
                     title="Download PNG thumbnail of the realistic top view">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -887,6 +897,8 @@
                 const botDl = document.getElementById('png-bot-btn');
                 if (topDl) topDl.disabled = !realisticTopSvg;
                 if (botDl) botDl.disabled = !realisticBottomSvg;
+                const gerberDl = document.getElementById('gerber-btn');
+                if (gerberDl) gerberDl.disabled = false;
                 buildPlacementIndex();
 
                 // Render
@@ -953,6 +965,49 @@
                 const a = document.createElement('a');
                 a.href = objUrl;
                 a.download = base + '-' + side + '.png';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(objUrl), 5000);
+            } catch (e) {
+                alert(e.message);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = originalHtml;
+                    btn.style.width = '';
+                    btn.style.height = '';
+                }
+            }
+        }
+
+        // ===== Gerber export download =====
+        async function downloadGerber() {
+            if (!currentFile) return;
+            const btn = document.getElementById('gerber-btn');
+            if (btn && btn.disabled) return;
+            const rect = btn ? btn.getBoundingClientRect() : null;
+            const originalHtml = btn ? btn.innerHTML : '';
+            if (btn) {
+                btn.style.width = rect.width + 'px';
+                btn.style.height = rect.height + 'px';
+                btn.disabled = true;
+                btn.innerHTML = '<span class="btn-spinner" aria-label="Converting"></span>';
+            }
+            try {
+                const form = new FormData();
+                form.append('file', currentFile);
+                const resp = await fetch(API_BASE + '/api/odbpp/gerber', { method: 'POST', body: form });
+                if (!resp.ok) {
+                    const text = await resp.text();
+                    throw new Error('Gerber export failed: ' + text);
+                }
+                const blob = await resp.blob();
+                const base = (currentFile.name || 'pcb').replace(/\.(zip|tgz|tar\.gz)$/i, '');
+                const objUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = objUrl;
+                a.download = base + '-gerber.zip';
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);

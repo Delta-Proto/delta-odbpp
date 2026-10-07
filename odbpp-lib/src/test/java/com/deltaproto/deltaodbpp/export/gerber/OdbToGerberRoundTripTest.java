@@ -60,7 +60,6 @@ class OdbToGerberRoundTripTest {
 
         OdbToGerberConverter.OutputFile copper = result.files.stream()
                 .filter(f -> f.fileFunction.startsWith("Copper,"))
-                .filter(f -> f.fileName.endsWith(".gbr"))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError(
                         "no copper Gerber file generated: " + result.files.stream()
@@ -87,8 +86,8 @@ class OdbToGerberRoundTripTest {
                 new OdbToGerberConverter().convert(job, DESIGNODB_STEP);
 
         for (OdbToGerberConverter.OutputFile file : result.files) {
-            if (!file.fileName.endsWith(".gbr")) {
-                continue;
+            if (file.fileName.endsWith(".drl")) {
+                continue; // Excellon, not Gerber
             }
             GerberDocument doc = new GerberParser().parse(file.content);
             assertNotNull(doc, file.fileName);

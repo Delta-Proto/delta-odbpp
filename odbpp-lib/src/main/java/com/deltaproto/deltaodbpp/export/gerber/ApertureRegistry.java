@@ -65,9 +65,18 @@ public class ApertureRegistry {
                 return rotatedObroundMacro(shape.width, shape.height, rot);
             }
             case ROUNDED_RECT:
-                return roundedRectMacro(shape.width, shape.height, shape.cornerRadius, rot);
+                if (shape.allCorners()) {
+                    return roundedRectMacro(shape.width, shape.height, shape.cornerSize, rot);
+                }
+                return outlineMacro("RRP:" + shape.width + "x" + shape.height + "r"
+                        + shape.cornerSize + "c" + shape.corners, rectOutline(shape), rot);
+            case CHAMFERED_RECT:
+                return outlineMacro("CH:" + shape.width + "x" + shape.height + "c"
+                        + shape.cornerSize + "c" + shape.corners, rectOutline(shape), rot);
             case DONUT:
                 return donutMacro(shape.width, shape.innerDiameter);
+            case THERMAL:
+                return thermalMacro(shape, rot);
             default:
                 throw new IllegalArgumentException("Unsupported shape: " + shape.kind);
         }
@@ -150,6 +159,139 @@ public class ApertureRegistry {
         });
     }
 
+    /** Vertices per rounded corner when a rectangle has to become an outline polygon. */
+    private static final int CORNER_SEGMENTS = 16;
+
+    /**
+     * Outline of a rectangle whose corners are individually plain, rounded or
+     * chamfered (ODB++ {@code rect<w>x<h>xr<r>x<corners>} / {@code xc<c>x<corners>}),
+     * as a closed counter-clockwise polygon centred on the origin. Corner
+     * numbering follows the spec: 1 top right, 2 top left, 3 bottom left,
+     * 4 bottom right.
+     */
+    static double[] rectOutline(OdbSymbolShape shape) {
+        double hw = shape.width / 2;
+        double hh = shape.height / 2;
+        double c = Math.min(shape.cornerSize, Math.min(hw, hh));
+        boolean rounded = shape.kind == OdbSymbolShape.Kind.ROUNDED_RECT;
+        List<Double> pts = new ArrayList<>();
+        int[][] signs = {{1, 1}, {-1, 1}, {-1, -1}, {1, -1}};
+        for (int k = 1; k <= 4; k++) {
+            int sx = signs[k - 1][0];
+            int sy = signs[k - 1][1];
+            if (!shape.hasCorner(k) || c <= 0) {
+                pts.add(sx * hw);
+                pts.add(sy * hh);
+            } else if (rounded) {
+                double cx = sx * (hw - c);
+                double cy = sy * (hh - c);
+                for (int i = 0; i <= CORNER_SEGMENTS; i++) {
+                    double a = Math.toRadians((k - 1) * 90.0 + 90.0 * i / CORNER_SEGMENTS);
+                    pts.add(cx + c * Math.cos(a));
+                    pts.add(cy + c * Math.sin(a));
+                }
+            } else {
+                // Chamfer: the point on the vertical edge and the one on the
+                // horizontal edge, in counter-clockwise order.
+                double vx = sx * hw;
+                double vy = sy * (hh - c);
+                double hx = sx * (hw - c);
+                double hy = sy * hh;
+                if (k == 1 || k == 3) {
+                    pts.add(vx);
+                    pts.add(vy);
+                    pts.add(hx);
+                    pts.add(hy);
+                } else {
+                    pts.add(hx);
+                    pts.add(hy);
+                    pts.add(vx);
+                    pts.add(vy);
+                }
+            }
+        }
+        double[] out = new double[pts.size()];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = pts.get(i);
+        }
+        return out;
+    }
+
+    /**
+     * D-code for an arbitrary closed polygon (x0,y0,x1,y1,...) flashed with the
+     * given clockwise rotation, as an outline-primitive (4) macro.
+     */
+    private int outlineMacro(String shapeKey, double[] polygon, double rotCw) {
+        String key = "OL:" + shapeKey + "@" + fmt(rotCw);
+        return register(key, dcode -> {
+            String macro = newMacroName();
+            int n = polygon.length / 2;
+            StringBuilder body = new StringBuilder();
+            body.append("4,1,").append(n);
+            for (int i = 0; i <= n; i++) {
+                int j = i % n;
+                body.append(',').append(fmt(polygon[2 * j])).append(',').append(fmt(polygon[2 * j + 1]));
+            }
+            body.append(',').append(fmt(-rotCw));
+            macroDefinitions.add("%AM" + macro + "*" + body + "*%");
+            return "%ADD" + dcode + macro + "*%";
+        });
+    }
+
+    /**
+     * Thermal relief. Four gaps map onto the Gerber thermal primitive (7),
+     * whose cross-shaped gap sits on the axes at rotation 0 — hence rotated by
+     * the ODB++ gap angle. Any other spoke count is built from one outline
+     * polygon per copper segment.
+     */
+    private int thermalMacro(OdbSymbolShape shape, double rotCw) {
+        double rotCcw = shape.gapAngle - rotCw;
+        String key = "TH:" + fmt(shape.width) + "x" + fmt(shape.innerDiameter) + "g"
+                + fmt(shape.gap) + "n" + shape.spokes + "@" + fmt(rotCcw);
+        return register(key, dcode -> {
+            String macro = newMacroName();
+            StringBuilder body = new StringBuilder();
+            if (shape.spokes == 4) {
+                body.append("7,0,0,").append(fmt(shape.width)).append(',')
+                        .append(fmt(shape.innerDiameter)).append(',').append(fmt(shape.gap))
+                        .append(',').append(fmt(rotCcw));
+            } else {
+                double ro = shape.width / 2;
+                double ri = shape.innerDiameter / 2;
+                int n = Math.max(1, shape.spokes);
+                double span = 2 * Math.PI / n;
+                double halfGapOuter = Math.asin(Math.min(1, shape.gap / 2 / ro));
+                double halfGapInner = Math.asin(Math.min(1, shape.gap / 2 / Math.max(ri, 1e-9)));
+                for (int s = 0; s < n; s++) {
+                    double g0 = Math.toRadians(rotCcw) + s * span;   // this gap's centre
+                    double g1 = g0 + span;                            // next gap's centre
+                    List<Double> pts = new ArrayList<>();
+                    for (int i = 0; i <= CORNER_SEGMENTS; i++) {
+                        double a = (g0 + halfGapOuter) + (g1 - halfGapOuter - g0 - halfGapOuter) * i / CORNER_SEGMENTS;
+                        pts.add(ro * Math.cos(a));
+                        pts.add(ro * Math.sin(a));
+                    }
+                    for (int i = CORNER_SEGMENTS; i >= 0; i--) {
+                        double a = (g0 + halfGapInner) + (g1 - halfGapInner - g0 - halfGapInner) * i / CORNER_SEGMENTS;
+                        pts.add(ri * Math.cos(a));
+                        pts.add(ri * Math.sin(a));
+                    }
+                    if (s > 0) {
+                        body.append('*');
+                    }
+                    body.append("4,1,").append(pts.size() / 2);
+                    for (int i = 0; i <= pts.size() / 2; i++) {
+                        int j = i % (pts.size() / 2);
+                        body.append(',').append(fmt(pts.get(2 * j))).append(',').append(fmt(pts.get(2 * j + 1)));
+                    }
+                    body.append(",0");
+                }
+            }
+            macroDefinitions.add("%AM" + macro + "*" + body + "*%");
+            return "%ADD" + dcode + macro + "*%";
+        });
+    }
+
     private int donutMacro(double outer, double inner) {
         String key = "DN:" + fmt(outer) + "x" + fmt(inner);
         return register(key, dcode -> {
@@ -205,6 +347,6 @@ public class ApertureRegistry {
         if (s.endsWith(".")) {
             s += "0";
         }
-        return s;
+        return s.equals("-0.0") ? "0.0" : s;
     }
 }

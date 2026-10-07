@@ -56,7 +56,7 @@
         <os-plugin.version>1.7.1</os-plugin.version>
         <spring-boot.version>3.2.0</spring-boot.version>
         <batik.version>1.19</batik.version>
-        <delta-gerber.version>1.1.6</delta-gerber.version>
+        <delta-gerber.version>1.8.0</delta-gerber.version>
     </properties>
 
     <dependencyManagement>

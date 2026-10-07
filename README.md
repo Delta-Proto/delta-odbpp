@@ -39,13 +39,24 @@ and converting them to Gerber X2 + Excellon. Ships with an interactive web viewe
 - PNG rasterisation of any view through the Batik pipeline
 
 ### ODB++ → Gerber / Excellon Conversion
-- Gerber X2 writer with `.FileFunction` attributes, regions (G36/G37),
-  arcs (G75), and polarity (LPD/LPC)
-- Aperture mapping to standard apertures and aperture macros, with full
+- Gerber X2 writer with `.FileFunction` / `.FilePolarity` attributes, regions
+  (G36/G37), arcs (G75), and polarity (LPD/LPC)
+- Surfaces with holes become single fractured (cut-in) region contours, so a
+  plane's clearances never erase traces drawn underneath
+- Aperture mapping to standard apertures and aperture macros (rounded and
+  chamfered rectangles with per-corner selection, thermals, donuts), with full
   user-symbol flattening and transforms
-- Excellon writer with drill hits, tool reuse, and **slot** support (G85)
+- Excellon writer with drill hits, oval-pad and line **slots** (G85), tools
+  numbered by ascending diameter, X2 attribute comments
 - Matrix-driven layer mapping for copper, soldermask, paste, legend,
-  plated/non-plated drills, and the board profile
+  plated/non-plated drills, and the board profile; files are named the way
+  KiCad names its plots (`F_Cu.gtl`, `In1_Cu.g1`, `B_Mask.gbs`, `Edge_Cuts.gm1`,
+  `PTH.drl`, …)
+- Options: subtract soldermask openings from the legend, file-name prefix,
+  outline stroke width (derived from the design's outline layer by default)
+- Verified against the EDA tools' own Gerber plots: every layer of KiCad and
+  Altium reference boards rasterises to the same image (see
+  `GerberReferenceTest`)
 
 ### Web Viewer (`delta-odbpp-app`)
 - Spring Boot app: upload an archive, view layers as stacked SVG
@@ -89,10 +100,17 @@ Files.write(Path.of("board-top.png"), topPng);
 ### Convert to Gerber + Excellon
 
 ```java
-OdbToGerberConverter.Result result = new OdbToGerberConverter().convert(job, "pcb");
-result.writeTo(Path.of("gerber-out"));        // writes .gbr / .drl files
-result.warnings.forEach(System.out::println); // any conversion warnings
+OdbToGerberConverter.Result result = new OdbToGerberConverter()
+        .setSubtractSoldermaskFromLegend(true)   // optional, KiCad-style legend clipping
+        .setFileNamePrefix("myboard-")           // optional
+        .convert(job);                           // first step; or convert(job, "pcb")
+result.writeTo(Path.of("gerber-out"));           // F_Cu.gtl, In1_Cu.g1, …, PTH.drl
+result.writeZip(new FileOutputStream("gerber-out.zip")); // or result.toZip() for bytes
+result.warnings.forEach(System.out::println);    // any conversion warnings
 ```
+
+The web viewer exposes the same conversion as `POST /api/odbpp/gerber` (multipart
+`file`, returns the zip) and as the **Gerber** download button.
 
 ## Symbol Visual Test
 

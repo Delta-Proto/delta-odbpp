@@ -15,31 +15,60 @@ import java.util.regex.Pattern;
  */
 public final class OdbSymbolShape {
 
-    public enum Kind { ROUND, SQUARE, RECT, ROUNDED_RECT, OVAL, DONUT }
+    public enum Kind { ROUND, SQUARE, RECT, ROUNDED_RECT, CHAMFERED_RECT, OVAL, DONUT, THERMAL }
 
-    private static final Pattern ROUND = Pattern.compile("r([0-9.]+)");
-    private static final Pattern SQUARE = Pattern.compile("s([0-9.]+)");
-    private static final Pattern RECT = Pattern.compile("rect([0-9.]+)x([0-9.]+)");
+    /** Round thermal relief: {@code thr<od>x<id>x<angle>x<spokes>x<gap>} (rounded or squared gap ends). */
+    private static final Pattern THERMAL =
+            Pattern.compile("th[rs]([0-9.]+)x([0-9.]+)x([0-9.]+)x(\\d+)x([0-9.]+)");
+
+    /** THERMAL only: angle (degrees, counter-clockwise) of the first gap. */
+    public final double gapAngle;
+    /** THERMAL only: number of gaps/spokes. */
+    public final int spokes;
+    /** THERMAL only: gap width in mm. */
+    public final double gap;
+
+    private static final String NUM = "([0-9.]+)";
+    private static final Pattern ROUND = Pattern.compile("r" + NUM);
+    private static final Pattern SQUARE = Pattern.compile("s" + NUM);
+    private static final Pattern RECT = Pattern.compile("rect" + NUM + "x" + NUM);
     private static final Pattern ROUNDED_RECT =
-            Pattern.compile("rect([0-9.]+)x([0-9.]+)xr([0-9.]+)(?:x([1-4]+))?");
-    private static final Pattern OVAL = Pattern.compile("oval([0-9.]+)x([0-9.]+)");
-    private static final Pattern DONUT = Pattern.compile("donut_r([0-9.]+)x([0-9.]+)");
+            Pattern.compile("rect" + NUM + "x" + NUM + "xr" + NUM + "(?:x([1-4]+))?");
+    private static final Pattern CHAMFERED_RECT =
+            Pattern.compile("rect" + NUM + "x" + NUM + "xc" + NUM + "(?:x([1-4]+))?");
+    private static final Pattern OVAL = Pattern.compile("oval" + NUM + "x" + NUM);
+    private static final Pattern DONUT = Pattern.compile("donut_r" + NUM + "x" + NUM);
 
     public final Kind kind;
     public final double width;   // mm; diameter for ROUND/SQUARE/DONUT outer
     public final double height;  // mm; 0 where not applicable
-    public final double cornerRadius; // mm; ROUNDED_RECT only
+    /** mm; corner radius (ROUNDED_RECT) or chamfer size (CHAMFERED_RECT). */
+    public final double cornerSize;
     public final double innerDiameter; // mm; DONUT only
-    public final String corners; // ROUNDED_RECT corner spec, null = all corners
+    /**
+     * Which corners get the corner treatment, as the spec's digit string
+     * (1 = top right, 2 = top left, 3 = bottom left, 4 = bottom right), or
+     * null for all four.
+     */
+    public final String corners;
 
     private OdbSymbolShape(Kind kind, double width, double height,
-                           double cornerRadius, double innerDiameter, String corners) {
+                           double cornerSize, double innerDiameter, String corners) {
+        this(kind, width, height, cornerSize, innerDiameter, corners, 0, 0, 0);
+    }
+
+    private OdbSymbolShape(Kind kind, double width, double height,
+                           double cornerSize, double innerDiameter, String corners,
+                           double gapAngle, int spokes, double gap) {
         this.kind = kind;
         this.width = width;
         this.height = height;
-        this.cornerRadius = cornerRadius;
+        this.cornerSize = cornerSize;
         this.innerDiameter = innerDiameter;
         this.corners = corners;
+        this.gapAngle = gapAngle;
+        this.spokes = spokes;
+        this.gap = gap;
     }
 
     /**
@@ -62,6 +91,13 @@ public final class OdbSymbolShape {
                     Double.parseDouble(m.group(2)) * unitToMm,
                     Double.parseDouble(m.group(3)) * unitToMm, 0, m.group(4));
         }
+        m = CHAMFERED_RECT.matcher(n);
+        if (m.matches()) {
+            return new OdbSymbolShape(Kind.CHAMFERED_RECT,
+                    Double.parseDouble(m.group(1)) * unitToMm,
+                    Double.parseDouble(m.group(2)) * unitToMm,
+                    Double.parseDouble(m.group(3)) * unitToMm, 0, m.group(4));
+        }
         m = RECT.matcher(n);
         if (m.matches()) {
             return new OdbSymbolShape(Kind.RECT,
@@ -80,6 +116,14 @@ public final class OdbSymbolShape {
                     Double.parseDouble(m.group(1)) * unitToMm, 0, 0,
                     Double.parseDouble(m.group(2)) * unitToMm, null);
         }
+        m = THERMAL.matcher(n);
+        if (m.matches()) {
+            return new OdbSymbolShape(Kind.THERMAL,
+                    Double.parseDouble(m.group(1)) * unitToMm, 0, 0,
+                    Double.parseDouble(m.group(2)) * unitToMm, null,
+                    Double.parseDouble(m.group(3)), Integer.parseInt(m.group(4)),
+                    Double.parseDouble(m.group(5)) * unitToMm);
+        }
         m = ROUND.matcher(n);
         if (m.matches()) {
             return new OdbSymbolShape(Kind.ROUND,
@@ -93,6 +137,16 @@ public final class OdbSymbolShape {
         return null;
     }
 
+    /** Whether corner {@code n} (1-4, see {@link #corners}) gets the corner treatment. */
+    public boolean hasCorner(int n) {
+        return corners == null || corners.indexOf((char) ('0' + n)) >= 0;
+    }
+
+    /** Whether all four corners get the corner treatment. */
+    public boolean allCorners() {
+        return hasCorner(1) && hasCorner(2) && hasCorner(3) && hasCorner(4);
+    }
+
     /**
      * The diameter to use when this symbol strokes a line or arc. Gerber
      * draws are only defined for circular apertures, so non-round symbols
@@ -100,7 +154,7 @@ public final class OdbSymbolShape {
      */
     public double strokeDiameter() {
         return switch (kind) {
-            case ROUND, DONUT -> width;
+            case ROUND, DONUT, THERMAL -> width;
             case SQUARE -> width;
             default -> height > 0 ? Math.min(width, height) : width;
         };
