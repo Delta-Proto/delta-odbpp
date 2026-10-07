@@ -7,7 +7,7 @@
     <parent>
         <groupId>com.deltaproto</groupId>
         <artifactId>delta-odbpp-parent</artifactId>
-        <version>1.4.1-SNAPSHOT</version>
+        <version>1.5.0</version>
     </parent>
 
     <artifactId>delta-odbpp-app</artifactId>
