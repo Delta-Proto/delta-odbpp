@@ -268,4 +268,31 @@ class EdaDataParserTest {
         assertTrue(edaData.getNetRecords().isEmpty());
         assertTrue(edaData.getPackageRecords().isEmpty());
     }
+
+    @Test
+    void testLatin1BytesDoNotAbortParsing(@TempDir Path tempDir) throws IOException {
+        // Altium emits the Latin-1 diameter sign (0xF8, 'ø') in dimension strings.
+        // That byte is malformed UTF-8 and used to throw MalformedInputException,
+        // which made OdbParser drop the entire step.
+        byte[] content = ("UNITS=MM\nNET GND\nPKG R0603 0.5 -0.8 -0.45 0.8 0.45\n"
+                + "# dimension text: 3.2\u00f8\n").getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+        Path dataFile = tempDir.resolve("data");
+        Files.write(dataFile, content);
+
+        EdaData edaData = parser.parse(dataFile, 1.0);
+
+        assertEquals(1, edaData.getNetRecords().size());
+        assertEquals("GND", edaData.getNetRecords().get(0).getName());
+        assertEquals(1, edaData.getPackageRecords().size());
+    }
+
+    @Test
+    void testUtf8ContentIsDecodedAsUtf8(@TempDir Path tempDir) throws IOException {
+        Path dataFile = tempDir.resolve("data");
+        Files.writeString(dataFile, "NET N\u00e9t\n");
+
+        EdaData edaData = parser.parse(dataFile, 1.0);
+
+        assertEquals("N\u00e9t", edaData.getNetRecords().get(0).getName());
+    }
 }

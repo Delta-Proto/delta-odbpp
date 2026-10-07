@@ -1,12 +1,12 @@
 package com.deltaproto.deltaodbpp.parser;
 
+import com.deltaproto.deltaodbpp.util.OdbText;
 import com.deltaproto.deltaodbpp.model.Matrix;
 import com.deltaproto.deltaodbpp.model.MatrixLayer;
 import com.deltaproto.deltaodbpp.model.Step;
 
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -18,7 +18,7 @@ public class MatrixParser {
         matrix.setLayers(new ArrayList<>());
         matrix.setSteps(new ArrayList<>());
 
-        try (BufferedReader reader = Files.newBufferedReader(matrixFile)) {
+        try (BufferedReader reader = OdbText.newBufferedReader(matrixFile)) {
             String line;
             while ((line = reader.readLine()) != null) {
                 line = line.trim();

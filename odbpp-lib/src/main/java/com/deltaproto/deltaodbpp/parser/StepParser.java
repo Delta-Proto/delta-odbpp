@@ -44,7 +44,14 @@ public class StepParser {
         if (Files.exists(edaDir)) {
             Path dataFile = edaDir.resolve("data");
             if (Files.exists(dataFile)) {
-                step.setEdaData(edaDataParser.parse(dataFile, mmScale));
+                // EDA data (nets, packages, component outlines) is auxiliary: a
+                // malformed file must not take the step's layers down with it.
+                try {
+                    step.setEdaData(edaDataParser.parse(dataFile, mmScale));
+                } catch (IOException | RuntimeException e) {
+                    logger.warn("Failed to parse {}; continuing without EDA data: {}",
+                            dataFile, e.toString());
+                }
             }
         }
 

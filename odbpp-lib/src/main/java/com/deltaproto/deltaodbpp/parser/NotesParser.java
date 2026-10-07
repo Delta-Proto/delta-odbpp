@@ -1,12 +1,12 @@
 package com.deltaproto.deltaodbpp.parser;
 
+import com.deltaproto.deltaodbpp.util.OdbText;
 import com.deltaproto.deltaodbpp.model.Notes;
 import com.deltaproto.deltaodbpp.model.Notes.Note;
 import com.deltaproto.deltaodbpp.model.Polarity;
 
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
@@ -20,7 +20,7 @@ public class NotesParser {
     public Notes parse(Path notesFile) throws IOException {
         Notes notes = new Notes();
 
-        try (BufferedReader reader = Files.newBufferedReader(notesFile)) {
+        try (BufferedReader reader = OdbText.newBufferedReader(notesFile)) {
             String line;
             while ((line = reader.readLine()) != null) {
                 line = line.trim();

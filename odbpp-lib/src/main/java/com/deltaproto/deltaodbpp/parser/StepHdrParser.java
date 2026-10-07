@@ -1,9 +1,9 @@
 package com.deltaproto.deltaodbpp.parser;
 
+import com.deltaproto.deltaodbpp.util.OdbText;
 import com.deltaproto.deltaodbpp.model.StepHdr;
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -15,7 +15,7 @@ public class StepHdrParser {
         StepHdr stepHdr = new StepHdr();
         stepHdr.setStepRepeats(new ArrayList<>());
 
-        try (BufferedReader reader = Files.newBufferedReader(stepHdrFile)) {
+        try (BufferedReader reader = OdbText.newBufferedReader(stepHdrFile)) {
             String line;
             while ((line = reader.readLine()) != null) {
                 line = line.trim();

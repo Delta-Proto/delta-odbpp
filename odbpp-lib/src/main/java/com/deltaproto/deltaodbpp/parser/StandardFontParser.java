@@ -1,9 +1,9 @@
 package com.deltaproto.deltaodbpp.parser;
 
+import com.deltaproto.deltaodbpp.util.OdbText;
 import com.deltaproto.deltaodbpp.model.StandardFont;
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 
@@ -12,7 +12,7 @@ public class StandardFontParser {
         StandardFont font = new StandardFont();
         font.setCharacters(new ArrayList<>());
 
-        try (BufferedReader reader = Files.newBufferedReader(fontFile)) {
+        try (BufferedReader reader = OdbText.newBufferedReader(fontFile)) {
             String line;
             while ((line = reader.readLine()) != null) {
                 line = line.trim();

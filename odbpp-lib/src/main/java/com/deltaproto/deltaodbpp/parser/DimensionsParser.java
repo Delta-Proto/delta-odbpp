@@ -1,11 +1,11 @@
 package com.deltaproto.deltaodbpp.parser;
 
+import com.deltaproto.deltaodbpp.util.OdbText;
 import com.deltaproto.deltaodbpp.model.Dimensions;
 import com.deltaproto.deltaodbpp.model.Dimensions.*;
 
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
@@ -19,7 +19,7 @@ public class DimensionsParser {
     public Dimensions parse(Path dimensionsFile) throws IOException {
         Dimensions dimensions = new Dimensions();
 
-        try (BufferedReader reader = Files.newBufferedReader(dimensionsFile)) {
+        try (BufferedReader reader = OdbText.newBufferedReader(dimensionsFile)) {
             String line;
             while ((line = reader.readLine()) != null) {
                 line = line.trim();

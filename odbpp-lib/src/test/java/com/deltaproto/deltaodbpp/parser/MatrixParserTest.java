@@ -151,4 +151,18 @@ class MatrixParserTest {
         assertTrue(matrix.getSteps().isEmpty());
         assertTrue(matrix.getLayers().isEmpty());
     }
+
+    @Test
+    void testLatin1DielectricNameDoesNotAbortParsing(@TempDir Path tempDir) throws IOException {
+        byte[] content = ("LAYER {\n   ROW=1\n   CONTEXT=BOARD\n   TYPE=DIELECTRIC\n   NAME=diel\n"
+                + "   POLARITY=POSITIVE\n   DIELECTRIC_TYPE=CORE\n   DIELECTRIC_NAME=FR4 \u00b1 10\n}\n")
+                .getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+        Path matrixFile = tempDir.resolve("matrix");
+        Files.write(matrixFile, content);
+
+        Matrix matrix = parser.parse(matrixFile);
+
+        assertEquals(1, matrix.getLayers().size());
+        assertEquals("FR4 \u00b1 10", matrix.getLayers().get(0).getDielectricName());
+    }
 }

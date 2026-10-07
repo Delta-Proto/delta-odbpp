@@ -1,11 +1,11 @@
 package com.deltaproto.deltaodbpp.parser;
 
+import com.deltaproto.deltaodbpp.util.OdbText;
 import com.deltaproto.deltaodbpp.model.AttributeDefinition;
 import com.deltaproto.deltaodbpp.model.AttributeType;
 
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -14,7 +14,7 @@ public class AttributeDefinitionParser {
 
     public Map<String, AttributeDefinition> parse(Path attrDefFile) throws IOException {
         Map<String, AttributeDefinition> definitions = new HashMap<>();
-        try (BufferedReader reader = Files.newBufferedReader(attrDefFile)) {
+        try (BufferedReader reader = OdbText.newBufferedReader(attrDefFile)) {
             String line;
             while ((line = reader.readLine()) != null) {
                 line = line.trim();

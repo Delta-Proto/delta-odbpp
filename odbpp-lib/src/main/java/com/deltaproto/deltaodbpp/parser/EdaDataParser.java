@@ -2,8 +2,8 @@ package com.deltaproto.deltaodbpp.parser;
 
 import com.deltaproto.deltaodbpp.model.ContourPolygon;
 import com.deltaproto.deltaodbpp.model.EdaData;
+import com.deltaproto.deltaodbpp.util.OdbText;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -48,7 +48,9 @@ public class EdaDataParser {
      *                {@code UNITS=} directive in the file if one is present.
      */
     public EdaData parse(Path dataFile, double mmScale) throws IOException {
-        return parse(Files.readAllLines(dataFile), mmScale);
+        // Altium writes Latin-1 bytes (e.g. 0xF8 'ø' in dimension text) into this
+        // file; a plain UTF-8 read would throw and take the whole step down with it.
+        return parse(OdbText.readAllLines(dataFile), mmScale);
     }
 
     /** Parse already-read lines; see {@link #parse(Path, double)}. */

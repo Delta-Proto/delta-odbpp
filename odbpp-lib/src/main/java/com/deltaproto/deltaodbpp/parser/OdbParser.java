@@ -1,5 +1,6 @@
 package com.deltaproto.deltaodbpp.parser;
 
+import com.deltaproto.deltaodbpp.util.OdbText;
 import com.deltaproto.deltaodbpp.model.*;
 import com.deltaproto.deltaodbpp.XmlParser;
 import org.slf4j.Logger;
@@ -40,7 +41,7 @@ public class OdbParser {
             }
             Path lastSaveFile = miscDir.resolve("last_save");
             if (Files.exists(lastSaveFile)) {
-                try (Stream<String> lines = Files.lines(lastSaveFile)) {
+                try (Stream<String> lines = OdbText.lines(lastSaveFile)) {
                     job.setLastSave(lines.findFirst().orElse(null));
                 }
             }

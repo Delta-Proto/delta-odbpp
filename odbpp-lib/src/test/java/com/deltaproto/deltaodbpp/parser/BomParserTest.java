@@ -318,4 +318,18 @@ class BomParserTest {
         assertEquals(1, item.getDescriptions().size());
         assertEquals("Test description", item.getDescriptions().get(0));
     }
-} 
+
+    @Test
+    void testLatin1DescriptionDoesNotAbortParsing(@TempDir Path tempDir) throws IOException {
+        // "µ" and "Ω" as single Latin-1/Windows-1252 bytes are malformed UTF-8.
+        byte[] content = ("CPN C1\nMPN GRM188\nDSC 4.7\u00b5F 0603\nQLF 0\nCHS 1\n")
+                .getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+        Path bomFile = tempDir.resolve("bom");
+        Files.write(bomFile, content);
+
+        Bom bom = parser.parse(bomFile);
+
+        assertEquals(1, bom.getItems().size());
+        assertEquals("4.7\u00b5F 0603", bom.getItems().get(0).getDescriptions().get(0));
+    }
+}

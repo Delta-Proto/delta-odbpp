@@ -1,9 +1,9 @@
 package com.deltaproto.deltaodbpp.parser;
 
+import com.deltaproto.deltaodbpp.util.OdbText;
 import com.deltaproto.deltaodbpp.model.DCode;
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -11,7 +11,7 @@ import java.util.List;
 public class DCodeParser {
     public List<DCode> parse(Path dcodesFile) throws IOException {
         List<DCode> dcodes = new ArrayList<>();
-        try (BufferedReader reader = Files.newBufferedReader(dcodesFile)) {
+        try (BufferedReader reader = OdbText.newBufferedReader(dcodesFile)) {
             String line;
             while ((line = reader.readLine()) != null) {
                 line = line.trim();
