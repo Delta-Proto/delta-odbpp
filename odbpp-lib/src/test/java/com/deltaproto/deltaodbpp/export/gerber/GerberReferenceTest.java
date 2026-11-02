@@ -6,7 +6,6 @@ import com.deltaproto.deltagerber.model.drill.DrillOperation;
 import com.deltaproto.deltagerber.model.drill.DrillSlot;
 import com.deltaproto.deltagerber.model.gerber.GerberDocument;
 import com.deltaproto.deltagerber.model.gerber.aperture.CircleAperture;
-import com.deltaproto.deltagerber.model.gerber.attribute.FileAttribute;
 import com.deltaproto.deltagerber.model.gerber.operation.Draw;
 import com.deltaproto.deltagerber.model.gerber.operation.Flash;
 import com.deltaproto.deltagerber.model.gerber.operation.GraphicsObject;
@@ -15,14 +14,12 @@ import com.deltaproto.deltagerber.parser.GerberParser;
 import com.deltaproto.deltaodbpp.model.Job;
 import com.deltaproto.deltaodbpp.parser.OdbParser;
 import com.deltaproto.deltaodbpp.testutil.Fixtures;
-import com.deltaproto.deltaodbpp.testutil.GerberRaster;
+import com.deltaproto.deltaodbpp.testutil.LayerCompare;
 import org.junit.jupiter.api.DynamicContainer;
 import org.junit.jupiter.api.DynamicNode;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.TestFactory;
 
-import java.awt.geom.Rectangle2D;
-import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -48,9 +45,9 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * reference Gerber, and drill files with the same holes and slots.
  *
  * <p>The comparison is geometric, not textual: both files are parsed with delta-gerber and
- * rasterised ({@link GerberRaster}); a layer passes when the area inked by only one of the two
- * images is below {@value #MAX_MISMATCH_FRACTION} of the inked union, with a one-pixel
- * tolerance band (10&nbsp;µm on small boards, coarser on large ones) for edge jitter. Drill
+ * rasterised ({@link LayerCompare}); a layer passes when the area inked by only one of the two
+ * images is below {@value LayerCompare#MAX_MISMATCH_FRACTION} of the inked union, with a
+ * one-pixel tolerance band (10&nbsp;µm on small boards, coarser on large ones) for edge jitter. Drill
  * files are compared hit by hit and slot by slot over the union of all drill files of the set,
  * since tools split plated/non-plated holes differently.
  *
@@ -76,14 +73,6 @@ class GerberReferenceTest {
     private static final Path DIFF_DIR = Path.of("target", "gerber-reference-diffs");
     private static final Path OUT_DIR = Path.of("target", "gerber-reference-out");
 
-    /** Raster resolution ceiling: 100 px/mm = 10 µm pixels. */
-    private static final double MAX_PX_PER_MM = 100;
-    /** Raster size ceiling; the resolution drops on large boards to stay under it. */
-    private static final double MAX_PIXELS = 40e6;
-    /** Edge jitter tolerance in pixels. */
-    private static final int TOLERANCE_PX = 1;
-    /** Maximum area inked by only one of the two images, as a fraction of the inked union. */
-    private static final double MAX_MISMATCH_FRACTION = 0.001;
     /** Drill coordinate tolerance: references write three or four decimals. */
     private static final double DRILL_TOLERANCE_MM = 0.0015;
 
@@ -190,20 +179,8 @@ class GerberReferenceTest {
         assertTrue(generated.getWarnings().isEmpty(),
                 name + ": generated Gerber parse warnings: " + generated.getWarnings());
 
-        List<String> refFunction = reference.getFileFunctionValues();
-        if (refFunction != null && !refFunction.isEmpty()) {
-            List<String> genFunction = generated.getFileFunctionValues();
-            // Altium appends ",Signal"/",Plane" to copper functions; compare the spec'd part.
-            int n = "Copper".equals(refFunction.get(0)) ? 3 : refFunction.size();
-            assertEquals(refFunction.subList(0, Math.min(n, refFunction.size())),
-                    genFunction.subList(0, Math.min(n, genFunction.size())),
-                    name + ": .FileFunction");
-            String refPolarity = attribute(reference, ".FilePolarity");
-            if (refPolarity != null) {
-                assertEquals(refPolarity, attribute(generated, ".FilePolarity"),
-                        name + ": .FilePolarity");
-            }
-        }
+        String functionProblem = LayerCompare.fileFunctionMismatch(reference, generated);
+        assertTrue(functionProblem == null, () -> name + ": " + functionProblem);
 
         if (Boolean.parseBoolean(set.options.getProperty("assertFlashCounts", "false"))
                 && (name.endsWith("Cu.gtl") || name.endsWith("Cu.gbl") || name.contains("_Cu.g")
@@ -211,28 +188,16 @@ class GerberReferenceTest {
             assertEquals(flashes(reference), flashes(generated), name + ": flash (pad) count");
         }
 
-        Rectangle2D window = GerberRaster.window(reference, generated, 1.0);
-        if (window == null) {
+        LayerCompare.Result cmp = LayerCompare.compare(reference, generated,
+                DIFF_DIR.resolve(set.name).resolve(name + ".png"));
+        if (cmp.bothEmpty()) {
             assertTrue(reference.getObjects().isEmpty() && generated.getObjects().isEmpty(),
                     name + ": one side is empty, the other is not");
             return;
         }
-        double pxPerMm = Math.min(MAX_PX_PER_MM,
-                Math.sqrt(MAX_PIXELS / (window.getWidth() * window.getHeight())));
-        BufferedImage ref = GerberRaster.rasterise(reference, window, pxPerMm);
-        BufferedImage gen = GerberRaster.rasterise(generated, window, pxPerMm);
-        GerberRaster.Comparison cmp = GerberRaster.compare(ref, gen, TOLERANCE_PX);
-
-        String summary = String.format(Locale.ROOT,
-                "[%s] %s: mismatch %.4f%% at %.0f px/mm (only reference: %d px, only ours: %d px, union %d px)",
-                set.name, name, cmp.mismatchFraction() * 100, pxPerMm,
-                cmp.onlyA(), cmp.onlyB(), cmp.union());
+        String summary = "[" + set.name + "] " + name + ": " + cmp.summary();
         System.out.println(summary);
-        if (cmp.mismatchFraction() > MAX_MISMATCH_FRACTION) {
-            Path diff = DIFF_DIR.resolve(set.name).resolve(name + ".png");
-            GerberRaster.writeDiff(ref, gen, TOLERANCE_PX, diff);
-            throw new AssertionError(summary + " — diff written to " + diff);
-        }
+        assertTrue(cmp.passes(), () -> summary + " — diff written to " + cmp.diff());
     }
 
     private static void compareDrills(ReferenceSet set) {
@@ -280,11 +245,6 @@ class GerberReferenceTest {
         return set.result.files.stream().filter(f -> f.fileName.equals(name)).findFirst()
                 .orElseThrow(() -> new AssertionError("no generated file named " + name
                         + "; have " + set.result.files.stream().map(f -> f.fileName).toList()));
-    }
-
-    private static String attribute(GerberDocument doc, String name) {
-        FileAttribute attr = doc.getFileAttributes().get(name);
-        return attr == null ? null : String.valueOf(attr.getValues());
     }
 
     private static long flashes(GerberDocument doc) {

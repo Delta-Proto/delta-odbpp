@@ -75,6 +75,12 @@ public final class Fixtures {
      * references for {@code GerberReferenceTest}.
      */
     public static final Path GERBER_REFERENCE_SETS = PRIVATE_TESTDATA.resolve("gerber-reference");
+    /**
+     * Production boards exported both as ODB++ and as the EDA tool's own Gerber/Excellon plot,
+     * with the reference files under their original names and a {@code reference.properties}
+     * manifest per set (see {@link PairManifest}). Drives {@code OdbGerberPairDrillTest}.
+     */
+    public static final Path ODB_GERBER_PAIRS = PRIVATE_TESTDATA.resolve("odb-gerber-pairs");
 
     /** Whether a private fixture directory is present on this machine. */
     public static boolean hasPrivate(Path fixture) {

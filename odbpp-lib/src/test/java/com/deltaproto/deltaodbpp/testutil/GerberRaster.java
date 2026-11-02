@@ -33,6 +33,7 @@ import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 /**
  * Rasterises a parsed Gerber image (delta-gerber model) into a binary bitmap and compares two
@@ -146,6 +147,44 @@ public final class GerberRaster {
             }
         }
         return new Comparison(inkA, inkB, onlyA, onlyB);
+    }
+
+    /** Clears every pixel of {@code img} within {@code radiusPx} of an inked pixel of {@code mask}. */
+    public static void clear(BufferedImage img, BufferedImage mask, int radiusPx) {
+        int w = img.getWidth();
+        int h = img.getHeight();
+        if (mask.getWidth() != w || mask.getHeight() != h) {
+            throw new IllegalArgumentException("bitmap sizes differ");
+        }
+        boolean[] m = dilate(ink(mask), w, h, radiusPx);
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                if (m[y * w + x]) {
+                    img.getRaster().setSample(x, y, 0, 0);
+                }
+            }
+        }
+    }
+
+    /** The pixels inked in every one of the images (all the same size), as a bitmap. */
+    public static BufferedImage intersection(List<BufferedImage> images) {
+        BufferedImage first = images.get(0);
+        int w = first.getWidth();
+        int h = first.getHeight();
+        boolean[] common = ink(first);
+        for (BufferedImage img : images.subList(1, images.size())) {
+            boolean[] i = ink(img);
+            for (int k = 0; k < common.length; k++) {
+                common[k] &= i[k];
+            }
+        }
+        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_BYTE_GRAY);
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                out.getRaster().setSample(x, y, 0, common[y * w + x] ? 255 : 0);
+            }
+        }
+        return out;
     }
 
     /**
