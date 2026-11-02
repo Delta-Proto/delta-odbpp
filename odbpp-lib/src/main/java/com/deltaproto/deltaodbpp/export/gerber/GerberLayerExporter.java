@@ -302,7 +302,10 @@ public class GerberLayerExporter {
         List<RegionFracturer.Ring> holes = new ArrayList<>();
         for (ContourPolygon polygon : surface.getPolygons()) {
             RegionFracturer.Ring ring = RegionFracturer.ring(polygon, transform);
-            if (ring.size() < 2 || Math.abs(RegionFracturer.signedArea(ring)) < 1e-9) {
+            // A contour that is one full-circle arc (a round hole in a plane, a round
+            // island) has a single vertex and a closing arc edge; only its area tells it
+            // from a degenerate sliver.
+            if (ring.size() < 1 || Math.abs(RegionFracturer.signedArea(ring)) < 1e-9) {
                 continue; // degenerate sliver, inks nothing
             }
             (polygon.getType() == ContourPolygon.Type.ISLAND ? islands : holes).add(ring);

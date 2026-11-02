@@ -7,8 +7,10 @@ import com.deltaproto.deltaodbpp.model.Job;
 import com.deltaproto.deltaodbpp.model.Layer;
 import com.deltaproto.deltaodbpp.model.Line;
 import com.deltaproto.deltaodbpp.model.MatrixLayer;
+import com.deltaproto.deltaodbpp.model.Pad;
 import com.deltaproto.deltaodbpp.model.Step;
 import com.deltaproto.deltaodbpp.model.Tool;
+import com.deltaproto.deltaodbpp.model.Tools;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -37,7 +39,8 @@ import java.util.zip.ZipOutputStream;
  *   <li>SIGNAL / POWER_GROUND / MIXED → copper Gerber (Copper,Ln,Top/Inr/Bot)</li>
  *   <li>SOLDER_MASK / SILK_SCREEN / SOLDER_PASTE → Gerber with the matching
  *       X2 file function and Top/Bot side derived from matrix row order</li>
- *   <li>DRILL → Excellon; slots (oval/line drill features) become G85 records</li>
+ *   <li>DRILL → Excellon, split into plated and non-plated files by each hole's
+ *       {@code .drill} attribute or tool; slots (oval/line drill features) become G85 records</li>
  *   <li>ROUT → Gerber strokes of the milling path (Other,Rout)</li>
  *   <li>step profile → board outline Gerber (Profile,NP)</li>
  * </ul>
@@ -270,9 +273,37 @@ public class OdbToGerberConverter {
         return "NEGATIVE".equalsIgnoreCase(ml.getPolarity()) ? "Negative" : "Positive";
     }
 
+    /**
+     * Writes the drill layer as Excellon, split by plating. The ODB++ layer's own plating
+     * (tools file, name) is only the default: Cadence, Mentor and PADS keep plated and
+     * non-plated holes in one {@code drill} layer and mark each hole with the {@code .drill}
+     * feature attribute or the tool's type, and Altium before AD 22 does the same. Holes
+     * marked non-plated go to {@code NPTH.drl}, the rest to {@code PTH.drl}.
+     */
     private void addExcellon(Result result, Layer layer, MatrixLayer ml,
                              Map<String, Integer> copperIndex, int copperCount, Set<String> usedNames) {
-        boolean plated = isPlated(layer, ml);
+        boolean layerPlated = isPlated(layer, ml);
+        Features all = layer.getFeatures();
+        List<Feature> plated = new ArrayList<>();
+        List<Feature> nonPlated = new ArrayList<>();
+        for (Feature feature : all.getFeatures()) {
+            Boolean p = featurePlating(feature, all, layer.getTools());
+            if (p == null ? layerPlated : p) {
+                plated.add(feature);
+            } else {
+                nonPlated.add(feature);
+            }
+        }
+        if (!plated.isEmpty() || nonPlated.isEmpty() && layerPlated) {
+            writeExcellon(result, layer, ml, subset(all, plated), true, copperIndex, copperCount, usedNames);
+        }
+        if (!nonPlated.isEmpty() || plated.isEmpty() && !layerPlated) {
+            writeExcellon(result, layer, ml, subset(all, nonPlated), false, copperIndex, copperCount, usedNames);
+        }
+    }
+
+    private void writeExcellon(Result result, Layer layer, MatrixLayer ml, Features features, boolean plated,
+                               Map<String, Integer> copperIndex, int copperCount, Set<String> usedNames) {
         int from = copperIndex.getOrDefault(key(ml.getStartName()), 1);
         int to = copperIndex.getOrDefault(key(ml.getEndName()), copperCount == 0 ? 1 : copperCount);
         if (from > to) {
@@ -281,16 +312,90 @@ public class OdbToGerberConverter {
             to = tmp;
         }
         String kind = plated ? "PTH" : "NPTH";
-        String fileFunction = (plated ? "Plated," : "NonPlated,") + from + "," + to + "," + kind;
+        String fileFunction = drillFileFunction(plated, from, to, copperCount);
         boolean throughAll = from == 1 && to == Math.max(copperCount, 1);
         String base = throughAll ? kind + ".drl" : kind + "-L" + from + "-L" + to + ".drl";
 
-        ExcellonWriter.Result drill = new ExcellonWriter().export(
-                layer.getFeatures(), layer.getTools(), fileFunction);
+        ExcellonWriter.Result drill = new ExcellonWriter().export(features, layer.getTools(), fileFunction);
         prefixWarnings(result, layer.getName(), drill.warnings);
 
         result.files.add(new OutputFile(fileNamePrefix + unique(usedNames, base),
                 drill.content, fileFunction));
+    }
+
+    /** The same symbol and attribute tables over a subset of the features. */
+    private static Features subset(Features all, List<Feature> features) {
+        Features out = new Features();
+        out.setUnits(all.getUnits());
+        out.setSymbolTable(all.getSymbolTable());
+        out.setSymbolMirrorFlags(all.getSymbolMirrorFlags());
+        out.setAttributeNames(all.getAttributeNames());
+        out.setAttributeTextStrings(all.getAttributeTextStrings());
+        out.setFeatures(features);
+        return out;
+    }
+
+    /**
+     * Whether one drill feature is plated: from its {@code .drill} attribute
+     * (plated / non_plated / via, written as the option index 0 / 1 / 2 or as the word), else
+     * from the tools-file tool of its diameter, else null (the layer decides).
+     */
+    static Boolean featurePlating(Feature feature, Features features, Tools tools) {
+        Map<Integer, String> attributes = new LinkedHashMap<>();
+        int symbolNumber;
+        if (feature instanceof Pad pad) {
+            attributes.putAll(pad.getAttributes());
+            if (pad.getAttributeNumber() != null) {
+                attributes.putIfAbsent(pad.getAttributeNumber(), pad.getAttributeValue());
+            }
+            symbolNumber = pad.getSymbolNumber();
+        } else if (feature instanceof Line line) {
+            if (line.getAttributeNumber() != null) {
+                attributes.put(line.getAttributeNumber(), line.getAttributeValue());
+            }
+            symbolNumber = line.getSymbolNumber();
+        } else if (feature instanceof Arc arc) {
+            if (arc.getValue() != null) {
+                attributes.put(arc.getAtr(), arc.getValue());
+            }
+            symbolNumber = arc.getSymbolNumber();
+        } else {
+            return null;
+        }
+        for (Map.Entry<Integer, String> e : attributes.entrySet()) {
+            if (".drill".equalsIgnoreCase(features.getAttributeName(e.getKey()))) {
+                String v = e.getValue() == null ? "" : e.getValue().trim().toLowerCase(Locale.ROOT);
+                return switch (v) {
+                    case "1", "non_plated" -> false;
+                    case "0", "plated", "2", "via" -> true;
+                    default -> null;
+                };
+            }
+        }
+        if (tools != null && tools.getTools() != null) {
+            double unitToMm = features.isMillimeters() ? 0.001 : 0.0254;
+            OdbSymbolShape shape = OdbSymbolShape.parse(features.getSymbolName(symbolNumber), unitToMm);
+            if (shape != null) {
+                for (Tool tool : tools.getTools()) {
+                    if (tool.getFinishSize() > 0 && Math.abs(tool.getFinishSize() - shape.strokeDiameter()) <= 0.005) {
+                        return tool.getType() != Tool.ToolType.NON_PLATED;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The X2 {@code .FileFunction} of a drill file spanning copper layers {@code from} to
+     * {@code to} (1 = top): {@code Plated,1,4,PTH} through the board, {@code Blind} when one
+     * end is an outer layer, {@code Buried} when neither is.
+     */
+    static String drillFileFunction(boolean plated, int from, int to, int copperCount) {
+        int last = Math.max(copperCount, 1);
+        String span = from == 1 && to == last ? (plated ? "PTH" : "NPTH")
+                : from == 1 || to == last ? "Blind" : "Buried";
+        return (plated ? "Plated," : "NonPlated,") + from + "," + to + "," + span;
     }
 
     private void addProfile(Result result, Job job, Step step, List<MatrixLayer> boardLayers,

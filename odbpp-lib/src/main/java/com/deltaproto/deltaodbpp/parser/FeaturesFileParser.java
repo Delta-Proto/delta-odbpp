@@ -85,6 +85,7 @@ public class FeaturesFileParser {
         // overrides the step-level scale before any coordinate-bearing line is
         // processed. ODB++ archives sometimes (e.g. Mentor Xpedition exports) carry
         // no UNITS in stephdr but declare them per-features-file.
+        boolean declared = false;
         for (String line : lines) {
             String trimmed = line.trim();
             if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
@@ -93,6 +94,7 @@ public class FeaturesFileParser {
                 String unit = m.group(1).toUpperCase();
                 features.setUnits(unit);
                 this.mmScale = "MM".equalsIgnoreCase(unit) ? 1.0 : 25.4;
+                declared = true;
                 break; // assume only one UNITS directive per file
             }
             // Stop scanning once we hit a feature/symbol line — UNITS is always
@@ -100,6 +102,13 @@ public class FeaturesFileParser {
             char c = trimmed.charAt(0);
             if (c == '$' || c == '@' || c == '&' || c == 'P' || c == 'L'
                     || c == 'A' || c == 'S' || c == 'T' || c == 'B') break;
+        }
+        if (!declared) {
+            // No directive: the file is in the step's unit (INCH by the spec's default),
+            // and so are its symbol names — r9.8425 is 9.8425 mil in such a file. The
+            // model must say so, or every symbol size is read 25.4 times too small.
+            // Altium before AD 25 and PADS ODB++ Inside write their files this way.
+            features.setUnits(this.mmScale == 1.0 ? "MM" : "INCH");
         }
 
         for (int i = 0; i < lines.size(); i++) {
