@@ -1129,7 +1129,7 @@ public class MultiLayerSvgRenderer {
     /**
      * SVG path data for a list of contour polygons in model coordinates (mm), converted to the
      * output unit. Islands and holes go into one path so an evenodd fill cuts the holes out.
-     * Arcs carry a proper large-arc flag, computed from the swept angle about the centre.
+     * Arcs (including full circles) are written by {@link SvgArcs}.
      */
     private String contourPathData(List<ContourPolygon> polygons) {
         StringBuilder d = new StringBuilder();
@@ -1142,20 +1142,12 @@ public class MultiLayerSvgRenderer {
                 double ex = part.getEndX();
                 double ey = part.getEndY();
                 if (part.getType() == ContourPolygon.PolygonPart.Type.ARC) {
-                    double cx = part.getXCenter();
-                    double cy = part.getYCenter();
-                    double r = Math.hypot(ex - cx, ey - cy);
-                    double a0 = Math.atan2(py - cy, px - cx);
-                    double a1 = Math.atan2(ey - cy, ex - cx);
-                    // Swept angle in the direction of travel (model frame, Y up).
-                    double swept = part.isClockwise() ? a0 - a1 : a1 - a0;
-                    swept = ((swept % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-                    int largeArc = swept > Math.PI ? 1 : 0;
-                    // The viewport flips Y, so a clockwise model arc is drawn with sweep 0.
-                    int sweep = part.isClockwise() ? 0 : 1;
-                    d.append(String.format(Locale.US, " A %.4f %.4f 0 %d %d %.4f %.4f",
-                            baseOptions.toOutputUnit(r), baseOptions.toOutputUnit(r), largeArc, sweep,
-                            baseOptions.toOutputUnit(ex), baseOptions.toOutputUnit(ey)));
+                    d.append(SvgArcs.arcTo(
+                            baseOptions.toOutputUnit(px), baseOptions.toOutputUnit(py),
+                            baseOptions.toOutputUnit(ex), baseOptions.toOutputUnit(ey),
+                            baseOptions.toOutputUnit(part.getXCenter()),
+                            baseOptions.toOutputUnit(part.getYCenter()),
+                            part.isClockwise()));
                 } else {
                     d.append(String.format(Locale.US, " L %.4f %.4f",
                             baseOptions.toOutputUnit(ex), baseOptions.toOutputUnit(ey)));
@@ -1635,20 +1627,21 @@ public class MultiLayerSvgRenderer {
                     double startX = baseOptions.toOutputUnit(polygon.getXStart());
                     double startY = baseOptions.toOutputUnit(polygon.getYStart());
                     path.append(String.format(Locale.US, "M %.4f %.4f", startX, startY));
+                    double prevX = startX;
+                    double prevY = startY;
                     for (ContourPolygon.PolygonPart part : polygon.getPolygonParts()) {
                         double endX = baseOptions.toOutputUnit(part.getEndX());
                         double endY = baseOptions.toOutputUnit(part.getEndY());
                         if (part.getType() == ContourPolygon.PolygonPart.Type.SEGMENT) {
                             path.append(String.format(Locale.US, " L %.4f %.4f", endX, endY));
                         } else if (part.getType() == ContourPolygon.PolygonPart.Type.ARC) {
-                            double radius = Math.sqrt(
-                                    Math.pow(part.getEndX() - part.getXCenter(), 2) +
-                                    Math.pow(part.getEndY() - part.getYCenter(), 2));
-                            double r = baseOptions.toOutputUnit(radius);
-                            int sweep = part.isClockwise() ? 0 : 1;
-                            path.append(String.format(Locale.US, " A %.4f %.4f 0 0 %d %.4f %.4f",
-                                    r, r, sweep, endX, endY));
+                            path.append(SvgArcs.arcTo(prevX, prevY, endX, endY,
+                                    baseOptions.toOutputUnit(part.getXCenter()),
+                                    baseOptions.toOutputUnit(part.getYCenter()),
+                                    part.isClockwise()));
                         }
+                        prevX = endX;
+                        prevY = endY;
                     }
                     path.append(" Z ");
                 }
@@ -1659,17 +1652,16 @@ public class MultiLayerSvgRenderer {
                 double y2 = baseOptions.toOutputUnit(line.getYe());
                 path.append(String.format(Locale.US, "M %.4f %.4f L %.4f %.4f ", x1, y1, x2, y2));
             } else if (feature instanceof Arc arc) {
-                double radius = Math.sqrt(
-                        Math.pow(arc.getXs() - arc.getXc(), 2) +
-                        Math.pow(arc.getYs() - arc.getYc(), 2));
-                double r = baseOptions.toOutputUnit(radius);
                 double xs = baseOptions.toOutputUnit(arc.getXs());
                 double ys = baseOptions.toOutputUnit(arc.getYs());
                 double xe = baseOptions.toOutputUnit(arc.getXe());
                 double ye = baseOptions.toOutputUnit(arc.getYe());
-                int sweepFlag = "Y".equalsIgnoreCase(arc.getCw()) ? 0 : 1;
-                path.append(String.format(Locale.US, "M %.4f %.4f A %.4f %.4f 0 0 %d %.4f %.4f ",
-                        xs, ys, r, r, sweepFlag, xe, ye));
+                path.append(String.format(Locale.US, "M %.4f %.4f", xs, ys))
+                        .append(SvgArcs.arcTo(xs, ys, xe, ye,
+                                baseOptions.toOutputUnit(arc.getXc()),
+                                baseOptions.toOutputUnit(arc.getYc()),
+                                "Y".equalsIgnoreCase(arc.getCw())))
+                        .append(' ');
             }
         }
 
@@ -1993,6 +1985,8 @@ public class MultiLayerSvgRenderer {
                     double startX = baseOptions.toOutputUnit(polygon.getXStart());
                     double startY = baseOptions.toOutputUnit(polygon.getYStart());
                     pathData.append(String.format(Locale.US, "M %.4f %.4f", startX, startY));
+                    double prevX = startX;
+                    double prevY = startY;
 
                     for (ContourPolygon.PolygonPart part : polygon.getPolygonParts()) {
                         double endX = baseOptions.toOutputUnit(part.getEndX());
@@ -2001,14 +1995,13 @@ public class MultiLayerSvgRenderer {
                         if (part.getType() == ContourPolygon.PolygonPart.Type.SEGMENT) {
                             pathData.append(String.format(Locale.US, " L %.4f %.4f", endX, endY));
                         } else if (part.getType() == ContourPolygon.PolygonPart.Type.ARC) {
-                            double radius = Math.sqrt(
-                                    Math.pow(part.getEndX() - part.getXCenter(), 2) +
-                                    Math.pow(part.getEndY() - part.getYCenter(), 2));
-                            double r = baseOptions.toOutputUnit(radius);
-                            int sweepFlag = part.isClockwise() ? 0 : 1;
-                            pathData.append(String.format(Locale.US, " A %.4f %.4f 0 0 %d %.4f %.4f",
-                                    r, r, sweepFlag, endX, endY));
+                            pathData.append(SvgArcs.arcTo(prevX, prevY, endX, endY,
+                                    baseOptions.toOutputUnit(part.getXCenter()),
+                                    baseOptions.toOutputUnit(part.getYCenter()),
+                                    part.isClockwise()));
                         }
+                        prevX = endX;
+                        prevY = endY;
                     }
                     pathData.append(" Z");
 
@@ -2023,15 +2016,15 @@ public class MultiLayerSvgRenderer {
                 writer.write(String.format(Locale.US, "      <path d=\"M %.4f %.4f L %.4f %.4f\" %s/>\n",
                         x1, y1, x2, y2, profileStyle));
             } else if (feature instanceof Arc arc) {
-                double radius = Math.sqrt(Math.pow(arc.getXs() - arc.getXc(), 2) + Math.pow(arc.getYs() - arc.getYc(), 2));
-                double r = baseOptions.toOutputUnit(radius);
                 double xs = baseOptions.toOutputUnit(arc.getXs());
                 double ys = baseOptions.toOutputUnit(arc.getYs());
                 double xe = baseOptions.toOutputUnit(arc.getXe());
                 double ye = baseOptions.toOutputUnit(arc.getYe());
-                int sweepFlag = "Y".equalsIgnoreCase(arc.getCw()) ? 0 : 1;
-                writer.write(String.format(Locale.US, "      <path d=\"M %.4f %.4f A %.4f %.4f 0 0 %d %.4f %.4f\" %s/>\n",
-                        xs, ys, r, r, sweepFlag, xe, ye, profileStyle));
+                String arcData = SvgArcs.arcTo(xs, ys, xe, ye,
+                        baseOptions.toOutputUnit(arc.getXc()), baseOptions.toOutputUnit(arc.getYc()),
+                        "Y".equalsIgnoreCase(arc.getCw()));
+                writer.write(String.format(Locale.US, "      <path d=\"M %.4f %.4f%s\" %s/>\n",
+                        xs, ys, arcData, profileStyle));
             }
         }
 
@@ -2103,16 +2096,16 @@ public class MultiLayerSvgRenderer {
             // Symbol width is mm; convert to output unit.
             double strokeWidth = baseOptions.toOutputUnit(renderer.getWidth());
 
-            double radius = Math.sqrt(Math.pow(arc.getXs() - arc.getXc(), 2) + Math.pow(arc.getYs() - arc.getYc(), 2));
             double xs = baseOptions.toOutputUnit(arc.getXs());
             double ys = baseOptions.toOutputUnit(arc.getYs());
             double xe = baseOptions.toOutputUnit(arc.getXe());
             double ye = baseOptions.toOutputUnit(arc.getYe());
-            double r = baseOptions.toOutputUnit(radius);
-            int sweepFlag = "Y".equalsIgnoreCase(arc.getCw()) ? 0 : 1;
-            writer.write(String.format(Locale.US, "      <path d=\"M %.4f %.4f A %.4f %.4f 0 0 %d %.4f %.4f\" " +
+            String arcData = SvgArcs.arcTo(xs, ys, xe, ye,
+                    baseOptions.toOutputUnit(arc.getXc()), baseOptions.toOutputUnit(arc.getYc()),
+                    "Y".equalsIgnoreCase(arc.getCw()));
+            writer.write(String.format(Locale.US, "      <path d=\"M %.4f %.4f%s\" " +
                             "stroke=\"%s\" stroke-width=\"%.4f\" fill=\"none\" stroke-linecap=\"round\"/>\n",
-                    xs, ys, r, r, sweepFlag, xe, ye, color, strokeWidth));
+                    xs, ys, arcData, color, strokeWidth));
         } else if (feature instanceof Surface surface) {
             // Combine all polygons (islands and holes) into a single path with evenodd fill-rule
             // This ensures holes properly cut out from the islands
@@ -2122,6 +2115,8 @@ public class MultiLayerSvgRenderer {
                 double startX = baseOptions.toOutputUnit(polygon.getXStart());
                 double startY = baseOptions.toOutputUnit(polygon.getYStart());
                 combinedPath.append(String.format(Locale.US, "M %.4f %.4f", startX, startY));
+                double prevX = startX;
+                double prevY = startY;
 
                 for (ContourPolygon.PolygonPart part : polygon.getPolygonParts()) {
                     double endX = baseOptions.toOutputUnit(part.getEndX());
@@ -2130,14 +2125,13 @@ public class MultiLayerSvgRenderer {
                     if (part.getType() == ContourPolygon.PolygonPart.Type.SEGMENT) {
                         combinedPath.append(String.format(Locale.US, " L %.4f %.4f", endX, endY));
                     } else if (part.getType() == ContourPolygon.PolygonPart.Type.ARC) {
-                        double r = Math.sqrt(
-                                Math.pow(part.getEndX() - part.getXCenter(), 2) +
-                                Math.pow(part.getEndY() - part.getYCenter(), 2));
-                        double rConverted = baseOptions.toOutputUnit(r);
-                        int sweep = part.isClockwise() ? 0 : 1;
-                        combinedPath.append(String.format(Locale.US, " A %.4f %.4f 0 0 %d %.4f %.4f",
-                                rConverted, rConverted, sweep, endX, endY));
+                        combinedPath.append(SvgArcs.arcTo(prevX, prevY, endX, endY,
+                                baseOptions.toOutputUnit(part.getXCenter()),
+                                baseOptions.toOutputUnit(part.getYCenter()),
+                                part.isClockwise()));
                     }
+                    prevX = endX;
+                    prevY = endY;
                 }
                 combinedPath.append(" Z ");
             }
