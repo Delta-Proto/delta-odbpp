@@ -48,8 +48,15 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  */
 class OdbGerberPairLayerTest {
 
-    private static final Path SETS = Fixtures.ODB_GERBER_PAIRS;
-    private static final Path OUT = Path.of("target", "odb-gerber-pairs");
+    /** {@code -Dodb.gerber.pairs=<dir>} runs another corpus of the same layout. */
+    private static final Path SETS = Path.of(System.getProperty("odb.gerber.pairs", Fixtures.ODB_GERBER_PAIRS.toString()));
+    private static final Path OUT = Path.of(System.getProperty("odb.gerber.pairs.out", "target/odb-gerber-pairs"));
+    /**
+     * {@code -Dgerber.compare.raw=true} measures every layer without the per-set acceptance
+     * options (masks, thresholds, skips) so the numbers can be compared with another renderer's;
+     * the origin offset is kept, as it is geometry rather than acceptance.
+     */
+    private static final boolean RAW = Boolean.getBoolean("gerber.compare.raw");
     private static final Path SUMMARY = OUT.resolve("layer-summary.tsv");
     private static final Path DIFF_DIR = OUT.resolve("diffs");
     private static final String HEADER = String.join("\t", "set", "source", "role", "reference", "generated",
@@ -152,7 +159,7 @@ class OdbGerberPairLayerTest {
             String role = e.getKey();
             Path reference = e.getValue();
             tests.add(DynamicTest.dynamicTest(role + " = " + reference.getFileName(), () -> {
-                if (skip.contains(role)) {
+                if (!RAW && skip.contains(role)) {
                     summary(m, role, reference, "-", null, "skipped", "skipLayers");
                     assumeTrue(false, role + " skipped by options.properties");
                 }
@@ -205,15 +212,15 @@ class OdbGerberPairLayerTest {
         // Reference plots sometimes include a mechanical layer on every film (board outline,
         // layer-stack table); masking that file's ink out of both images keeps the rest verified.
         List<GerberDocument> masks = new ArrayList<>();
-        for (String maskFile : options.getProperty("maskReferenceWith", "").split("\\s*,\\s*")) {
+        for (String maskFile : RAW ? new String[0] : options.getProperty("maskReferenceWith", "").split("\\s*,\\s*")) {
             if (!maskFile.isBlank()) {
                 masks.add(new GerberParser().parse(Files.readString(m.gerberDir().resolve(maskFile.trim()), StandardCharsets.ISO_8859_1)));
             }
         }
-        double maxMismatch = Double.parseDouble(options.getProperty("maxMismatchPct." + role,
+        double maxMismatch = RAW ? LayerCompare.MAX_MISMATCH_FRACTION : Double.parseDouble(options.getProperty("maxMismatchPct." + role,
                 options.getProperty("maxMismatchPct", Double.toString(LayerCompare.MAX_MISMATCH_FRACTION * 100)))) / 100;
         LayerCompare.Result cmp;
-        if (Boolean.parseBoolean(options.getProperty("maskCommonReferenceInk", "false"))) {
+        if (!RAW && Boolean.parseBoolean(options.getProperty("maskCommonReferenceInk", "false"))) {
             java.awt.image.BufferedImage common = converted.commonInk();
             List<java.awt.image.BufferedImage> maskImages = new ArrayList<>();
             maskImages.add(common);
@@ -228,6 +235,11 @@ class OdbGerberPairLayerTest {
         String note = functionProblem != null ? functionProblem
                 : !ref.getWarnings().isEmpty() ? "reference parse warnings (" + ref.getWarnings().size() + "): "
                 + ref.getWarnings().get(0) : "";
+        if (RAW) {
+            java.awt.geom.Rectangle2D w = com.deltaproto.deltaodbpp.testutil.GerberRaster.window(ref, gen, 1.0);
+            note = (w == null ? "window=none" : String.format(Locale.ROOT, "window=%.3f,%.3f,%.3f,%.3f",
+                    w.getX(), w.getY(), w.getWidth(), w.getHeight())) + (note.isEmpty() ? "" : "; " + note);
+        }
         summary(m, role, reference, generatedName, cmp, status, note);
         assertTrue(status.equals("OK"), () -> m.name() + " " + role + " (" + generatedName + "): " + cmp.summary()
                 + (functionProblem != null ? "; " + functionProblem : "")
