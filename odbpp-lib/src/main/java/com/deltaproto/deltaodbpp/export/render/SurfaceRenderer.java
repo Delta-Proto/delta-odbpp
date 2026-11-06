@@ -1,5 +1,6 @@
 package com.deltaproto.deltaodbpp.export.render;
 
+import com.deltaproto.deltaodbpp.export.SvgArcs;
 import com.deltaproto.deltaodbpp.model.ContourPolygon;
 import com.deltaproto.deltaodbpp.model.Polarity;
 import com.deltaproto.deltaodbpp.model.Surface;
@@ -214,8 +215,8 @@ public class SurfaceRenderer extends AbstractSymbolRenderer {
 
             pathData.append(String.format(Locale.US, "M %.4f %.4f", sx, sy));
 
-            double prevX = polygon.startX;
-            double prevY = polygon.startY;
+            double prevX = sx;
+            double prevY = sy;
 
             for (PathPart part : polygon.parts) {
                 double ex = (part.endX + x) * scale;
@@ -224,36 +225,13 @@ public class SurfaceRenderer extends AbstractSymbolRenderer {
                 if (part.type == PathPart.Type.LINE) {
                     pathData.append(String.format(Locale.US, " L %.4f %.4f", ex, ey));
                 } else {
-                    // Arc
                     double cx = (part.centerX + x) * scale;
                     double cy = (part.centerY + y) * scale;
-
-                    // Calculate radius from center to end point
-                    double radius = Math.sqrt(
-                        Math.pow((part.endX - part.centerX) * scale, 2) +
-                        Math.pow((part.endY - part.centerY) * scale, 2));
-
-                    // Determine sweep direction
-                    // In SVG, sweep-flag=1 means clockwise, sweep-flag=0 means counter-clockwise
-                    // But SVG Y-axis is inverted compared to ODB++, so we need to flip
-                    int sweepFlag = part.clockwise ? 0 : 1;
-
-                    // Calculate if it's a large arc (> 180 degrees)
-                    double startAngle = Math.atan2(prevY - part.centerY, prevX - part.centerX);
-                    double endAngle = Math.atan2(part.endY - part.centerY, part.endX - part.centerX);
-                    double angleDiff = endAngle - startAngle;
-                    if (angleDiff < 0) angleDiff += 2 * Math.PI;
-                    if (!part.clockwise && angleDiff > Math.PI) {
-                        angleDiff = 2 * Math.PI - angleDiff;
-                    }
-                    int largeArcFlag = angleDiff > Math.PI ? 1 : 0;
-
-                    pathData.append(String.format(Locale.US, " A %.4f %.4f 0 %d %d %.4f %.4f",
-                        radius, radius, largeArcFlag, sweepFlag, ex, ey));
+                    pathData.append(SvgArcs.arcTo(prevX, prevY, ex, ey, cx, cy, part.clockwise));
                 }
 
-                prevX = part.endX;
-                prevY = part.endY;
+                prevX = ex;
+                prevY = ey;
             }
 
             pathData.append(" Z ");
@@ -284,6 +262,9 @@ public class SurfaceRenderer extends AbstractSymbolRenderer {
 
             pathData.append(String.format(Locale.US, "M %.4f %.4f", sx, sy));
 
+            double prevX = sx;
+            double prevY = sy;
+
             for (PathPart part : polygon.parts) {
                 double ex = (part.endX + x) * scale;
                 double ey = (part.endY + y) * scale;
@@ -291,13 +272,13 @@ public class SurfaceRenderer extends AbstractSymbolRenderer {
                 if (part.type == PathPart.Type.LINE) {
                     pathData.append(String.format(Locale.US, " L %.4f %.4f", ex, ey));
                 } else {
-                    double radius = Math.sqrt(
-                        Math.pow((part.endX - part.centerX) * scale, 2) +
-                        Math.pow((part.endY - part.centerY) * scale, 2));
-                    int sweepFlag = part.clockwise ? 0 : 1;
-                    pathData.append(String.format(Locale.US, " A %.4f %.4f 0 0 %d %.4f %.4f",
-                        radius, radius, sweepFlag, ex, ey));
+                    double cx = (part.centerX + x) * scale;
+                    double cy = (part.centerY + y) * scale;
+                    pathData.append(SvgArcs.arcTo(prevX, prevY, ex, ey, cx, cy, part.clockwise));
                 }
+
+                prevX = ex;
+                prevY = ey;
             }
 
             pathData.append(" Z ");

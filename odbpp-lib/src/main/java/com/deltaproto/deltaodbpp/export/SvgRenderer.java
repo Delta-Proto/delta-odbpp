@@ -293,37 +293,22 @@ public class SvgRenderer {
     }
 
     private void renderArc(Arc arc, Features features, Writer writer, String color) throws IOException {
-        // Calculate arc parameters for SVG path (in internal mm units first)
-        double xs = arc.getXs();
-        double ys = arc.getYs();
-        double xe = arc.getXe();
-        double ye = arc.getYe();
-        double xc = arc.getXc();
-        double yc = arc.getYc();
-
-        // Calculate radius in internal units
-        double radius = Math.sqrt(Math.pow(xs - xc, 2) + Math.pow(ys - yc, 2));
-
-        // Determine arc direction (large arc flag and sweep flag)
-        // This is simplified - full implementation would handle all cases
-        int largeArcFlag = 0;
-        boolean isClockwise = "Y".equalsIgnoreCase(arc.getCw());
-        int sweepFlag = isClockwise ? 0 : 1;
-
         // Resolve symbol to get line width. SymbolResolver returns mm; convert to output unit.
         SymbolRenderer renderer = getSymbolResolver(features).resolve(arc.getSymbolNumber(), features);
         double strokeWidth = options.toOutputUnit(renderer.getWidth());
 
-        // Convert all coordinates and radius to output units
-        double x1 = options.toOutputUnit(xs);
-        double y1 = options.toOutputUnit(ys);
-        double x2 = options.toOutputUnit(xe);
-        double y2 = options.toOutputUnit(ye);
-        double r = options.toOutputUnit(radius);
+        // Convert all coordinates to output units
+        double x1 = options.toOutputUnit(arc.getXs());
+        double y1 = options.toOutputUnit(arc.getYs());
+        double x2 = options.toOutputUnit(arc.getXe());
+        double y2 = options.toOutputUnit(arc.getYe());
+        String arcData = SvgArcs.arcTo(x1, y1, x2, y2,
+                options.toOutputUnit(arc.getXc()), options.toOutputUnit(arc.getYc()),
+                "Y".equalsIgnoreCase(arc.getCw()));
 
-        writer.write(String.format(Locale.US, "    <path d=\"M %.4f %.4f A %.4f %.4f 0 %d %d %.4f %.4f\" " +
+        writer.write(String.format(Locale.US, "    <path d=\"M %.4f %.4f%s\" " +
                         "stroke=\"%s\" stroke-width=\"%.4f\" fill=\"none\" stroke-linecap=\"round\"/>\n",
-                x1, y1, r, r, largeArcFlag, sweepFlag, x2, y2,
+                x1, y1, arcData,
                 color, strokeWidth));
     }
 
@@ -341,8 +326,8 @@ public class SvgRenderer {
             double startY = options.toOutputUnit(polygon.getYStart());
             pathData.append(String.format(Locale.US, "M %.4f %.4f", startX, startY));
 
-            double prevX = polygon.getXStart();
-            double prevY = polygon.getYStart();
+            double prevX = startX;
+            double prevY = startY;
 
             for (ContourPolygon.PolygonPart part : polygon.getPolygonParts()) {
                 double endX = options.toOutputUnit(part.getEndX());
@@ -351,33 +336,14 @@ public class SvgRenderer {
                 if (part.getType() == ContourPolygon.PolygonPart.Type.SEGMENT) {
                     pathData.append(String.format(Locale.US, " L %.4f %.4f", endX, endY));
                 } else if (part.getType() == ContourPolygon.PolygonPart.Type.ARC) {
-                    // Calculate radius for arc (in internal units first)
-                    double radius = Math.sqrt(
-                            Math.pow(part.getEndX() - part.getXCenter(), 2) +
-                            Math.pow(part.getEndY() - part.getYCenter(), 2));
-
-                    // Determine sweep direction
-                    // In SVG, sweep-flag=1 means clockwise, sweep-flag=0 means counter-clockwise
-                    // But SVG Y-axis is inverted, so we flip
-                    int sweepFlag = part.isClockwise() ? 0 : 1;
-
-                    // Calculate if it's a large arc (> 180 degrees)
-                    double startAngle = Math.atan2(prevY - part.getYCenter(), prevX - part.getXCenter());
-                    double endAngle = Math.atan2(part.getEndY() - part.getYCenter(), part.getEndX() - part.getXCenter());
-                    double angleDiff = endAngle - startAngle;
-                    if (angleDiff < 0) angleDiff += 2 * Math.PI;
-                    if (!part.isClockwise() && angleDiff > Math.PI) {
-                        angleDiff = 2 * Math.PI - angleDiff;
-                    }
-                    int largeArcFlag = angleDiff > Math.PI ? 1 : 0;
-
-                    double r = options.toOutputUnit(radius);
-                    pathData.append(String.format(Locale.US, " A %.4f %.4f 0 %d %d %.4f %.4f",
-                            r, r, largeArcFlag, sweepFlag, endX, endY));
+                    pathData.append(SvgArcs.arcTo(prevX, prevY, endX, endY,
+                            options.toOutputUnit(part.getXCenter()),
+                            options.toOutputUnit(part.getYCenter()),
+                            part.isClockwise()));
                 }
 
-                prevX = part.getEndX();
-                prevY = part.getEndY();
+                prevX = endX;
+                prevY = endY;
             }
 
             pathData.append(" Z ");
@@ -504,8 +470,8 @@ public class SvgRenderer {
             double startY = options.toOutputUnit(polygon.getYStart());
             pathData.append(String.format(Locale.US, "M %.4f %.4f", startX, startY));
 
-            double prevX = polygon.getXStart();
-            double prevY = polygon.getYStart();
+            double prevX = startX;
+            double prevY = startY;
 
             for (ContourPolygon.PolygonPart part : polygon.getPolygonParts()) {
                 double endX = options.toOutputUnit(part.getEndX());
@@ -514,28 +480,14 @@ public class SvgRenderer {
                 if (part.getType() == ContourPolygon.PolygonPart.Type.SEGMENT) {
                     pathData.append(String.format(Locale.US, " L %.4f %.4f", endX, endY));
                 } else if (part.getType() == ContourPolygon.PolygonPart.Type.ARC) {
-                    double radius = Math.sqrt(
-                            Math.pow(part.getEndX() - part.getXCenter(), 2) +
-                            Math.pow(part.getEndY() - part.getYCenter(), 2));
-                    int sweepFlag = part.isClockwise() ? 0 : 1;
-
-                    // Calculate large arc flag
-                    double startAngle = Math.atan2(prevY - part.getYCenter(), prevX - part.getXCenter());
-                    double endAngle = Math.atan2(part.getEndY() - part.getYCenter(), part.getEndX() - part.getXCenter());
-                    double angleDiff = endAngle - startAngle;
-                    if (angleDiff < 0) angleDiff += 2 * Math.PI;
-                    if (!part.isClockwise() && angleDiff > Math.PI) {
-                        angleDiff = 2 * Math.PI - angleDiff;
-                    }
-                    int largeArcFlag = angleDiff > Math.PI ? 1 : 0;
-
-                    double r = options.toOutputUnit(radius);
-                    pathData.append(String.format(Locale.US, " A %.4f %.4f 0 %d %d %.4f %.4f",
-                            r, r, largeArcFlag, sweepFlag, endX, endY));
+                    pathData.append(SvgArcs.arcTo(prevX, prevY, endX, endY,
+                            options.toOutputUnit(part.getXCenter()),
+                            options.toOutputUnit(part.getYCenter()),
+                            part.isClockwise()));
                 }
 
-                prevX = part.getEndX();
-                prevY = part.getEndY();
+                prevX = endX;
+                prevY = endY;
             }
 
             pathData.append(" Z ");
