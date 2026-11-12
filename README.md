@@ -14,13 +14,15 @@ ODB++ archive.*
 | | |
 |---|---|
 | ![All Layers view with the top-side layers selected](docs/screenshot-layers.png) | ![Board Top with a blue soldermask](docs/screenshot-soldermask.png) |
-| **Layer view** — every matrix layer as its own toggleable SVG layer; *Top* / *Bot* pick one side of the board, hovering a layer isolates it | **Soldermask colours** — green, purple, red, yellow, blue, white or black, switched live in the realistic views |
+| **Layer view** — every matrix layer as its own toggleable SVG layer in KiCad's layer colours; *Top* / *Bot* pick one side of the board (the bottom is shown mirrored, as seen from below), hovering a layer isolates it | **Soldermask colours** — green, purple, red, yellow, blue, white or black, switched live in the realistic views |
 | ![Rigid-flex board, top side, black soldermask](docs/screenshot-rigid-flex.png) | ![Rigid-flex board, bottom side](docs/screenshot-board-bottom.png) |
 | **Rigid-flex** — flex tail, coverlay and the dense BGA fan-outs of a 10-layer rigid-flex design | **Both sides** — the bottom of the same board, viewed from below |
 | ![Component placement overlay](docs/screenshot-components.png) | ![PCB layer stackup](docs/screenshot-stackup.png) |
 | **Components** — package outlines, pins and reference designators over the board, per side | **Stackup** — materials, dielectric constants and thicknesses, with the stack sum |
 | ![Bill of materials](docs/screenshot-bom.png) | ![Light theme](docs/screenshot-light.png) |
 | **BOM** — parts grouped with their reference designators, searchable, exportable as BOM or centroid CSV | **Light and dark themes** — plus one-click Gerber and PNG downloads |
+| ![Solder paste under a stencil foil](docs/screenshot-stencil.png) | ![The viewer on a phone](docs/screenshot-phone.png) |
+| **Paste and stencil** — solder paste on the pads, optionally seen through a stencil foil with its apertures cut out, with adjustable opacity | **On a phone** — the layer list becomes a bottom sheet, the tabs scroll sideways; drag to pan, pinch to zoom, tap a component for its details |
 
 All screenshots show the openly-available sample archives in [`examples/`](examples).
 
@@ -50,10 +52,13 @@ All screenshots show the openly-available sample archives in [`examples/`](examp
   symbol is drawn from its exact outline (thermals, donuts, rounded and chamfered
   rectangles, ovals, butterflies, moiré, hole symbols, …), user-defined symbols
   included, with rotation, mirroring and resize
-- Multi-layer composite rendering with configurable colours and opacity
+- Multi-layer composite rendering with configurable colours and opacity;
+  `LayerPalette.kicad(matrix)` colours a board the way KiCad does (copper by
+  side, a distinct colour per inner layer, mask, silk, paste, drills, outline)
 - Realistic top/bottom PCB views: copper under soldermask, exposed pads in the
   surface finish, silkscreen, through holes, and blind or micro vias as dimples
-  under the mask; seven soldermask colours
+  under the mask; seven soldermask colours. The SVG also carries hidden
+  solder-paste and stencil-foil groups a viewer can switch on
 - Negative (clear) features cut through the layer instead of being painted in the
   background colour, so layers stay correct when stacked
 - Frames are computed from what a layer actually draws — pad shapes, stroke
@@ -85,16 +90,19 @@ All screenshots show the openly-available sample archives in [`examples/`](examp
 ### Web Viewer (`delta-odbpp-app`)
 - Spring Boot app: open an archive (or press **Try Example**) and browse it in
   the browser — nothing is installed on the client
-- **All Layers**: stacked SVG layers in matrix order with per-layer toggling,
-  *Top* / *Bot* side filters, hover-to-isolate, pan and zoom on a millimetre grid
+- **All Layers**: stacked SVG layers in KiCad's colours with per-layer toggling,
+  *Top* / *Bot* side filters (a bottom-only selection is mirrored, as seen from
+  below), hover-to-isolate, pan and zoom on a millimetre grid
 - **Board Top / Board Bottom**: realistic renders with a live soldermask colour
-  picker
+  picker and a solder-paste / stencil overlay with adjustable opacity
 - **Components Top / Bottom**: package outlines and reference designators over
-  the board
+  the board; hover or tap a component for its part, package and placement
 - **Stackup**: layer table with materials, Dk and thicknesses
 - **BOM**: searchable parts list with BOM and centroid CSV export
 - Downloads: Gerber X2 + Excellon zip, PNG of either side
 - Light and dark themes
+- Works on a phone: the layer list is a swipe-up bottom sheet, the view tabs
+  scroll sideways, one finger pans, two fingers pinch-zoom
 
 ## Quick Start
 
