@@ -3,11 +3,26 @@
 A Java library for parsing ODB++ PCB design archives, rendering them to SVG/PNG,
 and converting them to Gerber X2 + Excellon. Ships with an interactive web viewer.
 
-![ODB++ Viewer — Board Top](docs/screenshot-board-top.png)
+![ODB++ Viewer — realistic board view of a DDR4 SO-DIMM](docs/screenshot-board-top.png)
 
-| Layer Stackup | Component Placement |
-|---------------|---------------------|
-| ![PCB layer stackup](docs/screenshot-stackup.png) | ![Component placement](docs/screenshot-components.png) |
+*The bundled web viewer showing the realistic top side of an 8-layer memory module —
+copper, soldermask, silkscreen, gold fingers and drills, rendered straight from the
+ODB++ archive.*
+
+## The Viewer at a Glance
+
+| | |
+|---|---|
+| ![All Layers view with the top-side layers selected](docs/screenshot-layers.png) | ![Board Top with a blue soldermask](docs/screenshot-soldermask.png) |
+| **Layer view** — every matrix layer as its own toggleable SVG layer; *Top* / *Bot* pick one side of the board, hovering a layer isolates it | **Soldermask colours** — green, purple, red, yellow, blue, white or black, switched live in the realistic views |
+| ![Rigid-flex board, top side, black soldermask](docs/screenshot-rigid-flex.png) | ![Rigid-flex board, bottom side](docs/screenshot-board-bottom.png) |
+| **Rigid-flex** — flex tail, coverlay and the dense BGA fan-outs of a 10-layer rigid-flex design | **Both sides** — the bottom of the same board, viewed from below |
+| ![Component placement overlay](docs/screenshot-components.png) | ![PCB layer stackup](docs/screenshot-stackup.png) |
+| **Components** — package outlines, pins and reference designators over the board, per side | **Stackup** — materials, dielectric constants and thicknesses, with the stack sum |
+| ![Bill of materials](docs/screenshot-bom.png) | ![Light theme](docs/screenshot-light.png) |
+| **BOM** — parts grouped with their reference designators, searchable, exportable as BOM or centroid CSV | **Light and dark themes** — plus one-click Gerber and PNG downloads |
+
+All screenshots show the openly-available sample archives in [`examples/`](examples).
 
 ## Maven Dependency
 
@@ -15,7 +30,7 @@ and converting them to Gerber X2 + Excellon. Ships with an interactive web viewe
 <dependency>
     <groupId>com.deltaproto</groupId>
     <artifactId>delta-odbpp</artifactId>
-    <version>1.0.0</version>
+    <version>1.6.0</version>
 </dependency>
 ```
 
@@ -31,9 +46,18 @@ and converting them to Gerber X2 + Excellon. Ships with an interactive web viewe
 - Malformed or partial archives degrade gracefully with recorded warnings
 
 ### SVG / PNG Rendering
-- Per-layer SVG rendering with the full ODB++ symbol catalogue
+- Per-layer SVG rendering with the full ODB++ standard-symbol catalogue: every
+  symbol is drawn from its exact outline (thermals, donuts, rounded and chamfered
+  rectangles, ovals, butterflies, moiré, hole symbols, …), user-defined symbols
+  included, with rotation, mirroring and resize
 - Multi-layer composite rendering with configurable colours and opacity
-- Realistic top/bottom PCB views (copper, soldermask, silkscreen, drills)
+- Realistic top/bottom PCB views: copper under soldermask, exposed pads in the
+  surface finish, silkscreen, through holes, and blind or micro vias as dimples
+  under the mask; seven soldermask colours
+- Negative (clear) features cut through the layer instead of being painted in the
+  background colour, so layers stay correct when stacked
+- Frames are computed from what a layer actually draws — pad shapes, stroke
+  widths and arc bulges — so nothing on the edge of the artwork is clipped
 - Component silhouette and centroid views
 - PCB layer-stackup cross-section view
 - PNG rasterisation of any view through the Batik pipeline
@@ -59,9 +83,18 @@ and converting them to Gerber X2 + Excellon. Ships with an interactive web viewe
   `GerberReferenceTest`)
 
 ### Web Viewer (`delta-odbpp-app`)
-- Spring Boot app: upload an archive, view layers as stacked SVG
-- Top / bottom / dual view modes, per-layer toggling, pan/zoom
-- Component centroid overlay
+- Spring Boot app: open an archive (or press **Try Example**) and browse it in
+  the browser — nothing is installed on the client
+- **All Layers**: stacked SVG layers in matrix order with per-layer toggling,
+  *Top* / *Bot* side filters, hover-to-isolate, pan and zoom on a millimetre grid
+- **Board Top / Board Bottom**: realistic renders with a live soldermask colour
+  picker
+- **Components Top / Bottom**: package outlines and reference designators over
+  the board
+- **Stackup**: layer table with materials, Dk and thicknesses
+- **BOM**: searchable parts list with BOM and centroid CSV export
+- Downloads: Gerber X2 + Excellon zip, PNG of either side
+- Light and dark themes
 
 ## Quick Start
 
