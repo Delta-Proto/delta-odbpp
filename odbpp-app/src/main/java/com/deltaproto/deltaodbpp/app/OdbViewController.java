@@ -2,6 +2,7 @@ package com.deltaproto.deltaodbpp.app;
 
 import com.deltaproto.deltaodbpp.OdbArchiveExtractor;
 import com.deltaproto.deltaodbpp.export.BomView;
+import com.deltaproto.deltaodbpp.export.LayerSideClassifier;
 import com.deltaproto.deltaodbpp.export.MultiLayerSvgRenderer;
 import com.deltaproto.deltaodbpp.export.SoldermaskColor;
 import com.deltaproto.deltaodbpp.export.StackupView;
@@ -402,6 +403,7 @@ public class OdbViewController {
         Step step = job.getSteps().values().iterator().next();
         Matrix matrix = job.getMatrix();
 
+        LayerSideClassifier sides = new LayerSideClassifier(matrix);
         Map<String, MatrixLayer> matrixMap = new HashMap<>();
         List<String> matrixOrder = new ArrayList<>();
         if (matrix != null && matrix.getLayers() != null) {
@@ -425,23 +427,26 @@ public class OdbViewController {
         for (String key : matrixOrder) {
             String realName = stepLayerKeys.get(key);
             if (realName == null) continue;
-            layers.add(layerMeta(realName, matrixMap.get(key)));
+            layers.add(layerMeta(realName, matrixMap.get(key), sides));
             emitted.add(key);
         }
         for (Map.Entry<String, String> entry : stepLayerKeys.entrySet()) {
             if (emitted.contains(entry.getKey())) continue;
-            layers.add(layerMeta(entry.getValue(), null));
+            layers.add(layerMeta(entry.getValue(), null, sides));
         }
 
         return layers;
     }
 
-    private Map<String, String> layerMeta(String layerName, MatrixLayer ml) {
+    private Map<String, String> layerMeta(String layerName, MatrixLayer ml, LayerSideClassifier sides) {
         Map<String, String> meta = new HashMap<>();
         meta.put("name", layerName);
         meta.put("id", "layer-" + layerName.replaceAll("[^a-zA-Z0-9_-]", "_"));
         meta.put("type", ml != null && ml.getType() != null ? ml.getType() : "DOCUMENT");
         meta.put("context", ml != null && ml.getContext() != null ? ml.getContext() : "");
+        // Physical side (TOP / BOTTOM / INNER / NEITHER): the matrix context only says
+        // BOARD or MISC, so the sidebar's Top / Bot filters need this.
+        meta.put("side", sides.sideOf(layerName).name());
         return meta;
     }
 

@@ -855,6 +855,7 @@
                     id: meta.id,
                     type: meta.type || 'DOCUMENT',
                     context: meta.context || '',
+                    side: meta.side || '',
                     color: LAYER_TYPE_COLORS[meta.type] || '#888888',
                     visible: true,
                     index
@@ -1603,7 +1604,7 @@
             layers.forEach(l => {
                 const isDrill = l.type === 'DRILL' || l.type === 'ROUT';
                 const isProfile = l.type === 'PROFILE';
-                const matchesSide = l.context === side;
+                const matchesSide = l.side === side;
                 l.visible = isDrill || isProfile || matchesSide;
             });
             applyLayerVisibility();
