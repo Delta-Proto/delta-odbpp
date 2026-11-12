@@ -35,6 +35,13 @@ public class MultiLayerSvgRenderer {
     private static final double SOLDERMASK_OPACITY = 0.75;
     private static final String BLIND_HOLE_COLOR = "#1a1a1a";    // Shadow in a hole that ends inside the board
     private static final double BLIND_HOLE_OPACITY = 0.55;
+    private static final String PASTE_COLOR = "#8d9499";          // Solder paste, a dull grey
+    private static final String STENCIL_COLOR = "#b7bcc1";        // Stainless stencil foil
+    /**
+     * The stencil sheet of the realistic view extends this far beyond the board on every
+     * side; it is square, so the longer side of the board sets its size.
+     */
+    public static final double STENCIL_MARGIN_MM = 300;
 
     /** Which side of the board a realistic render / colour setter applies to. */
     public enum Side { TOP, BOTTOM }
@@ -148,6 +155,30 @@ public class MultiLayerSvgRenderer {
         bottomColors.setSilkscreen(color);
         return this;
     }
+
+    /**
+     * Give layers a colour of their own in the multi-layer view and the per-layer
+     * renders, in place of the built-in colour of their matrix type. Layers the map does
+     * not name keep the built-in colour.
+     *
+     * @param colors hex colours keyed by layer name (matched case-insensitively), for
+     *     instance {@link LayerPalette#kicad(Matrix)}; {@code null} or empty restores the
+     *     built-in colours
+     */
+    public MultiLayerSvgRenderer setLayerColors(Map<String, String> colors) {
+        layerColors.clear();
+        if (colors != null) {
+            for (Map.Entry<String, String> e : colors.entrySet()) {
+                if (e.getKey() != null && e.getValue() != null) {
+                    layerColors.put(e.getKey().toLowerCase(Locale.ROOT), e.getValue());
+                }
+            }
+        }
+        return this;
+    }
+
+    /** Per-layer colour overrides, keyed by lower-case layer name. */
+    private final Map<String, String> layerColors = new HashMap<>();
 
     private static final Map<String, String> LAYER_TYPE_COLORS = new LinkedHashMap<>();
 
@@ -543,6 +574,11 @@ public class MultiLayerSvgRenderer {
      *   <li>Copper finish (gold HASL/ENIG, only at soldermask openings)</li>
      *   <li>Soldermask (green, semi-transparent) containing silkscreen</li>
      *   <li>Drill holes punch through all layers via mask</li>
+     *   <li>Solder paste and a stencil, both hidden ({@code display="none"}): the side's
+     *       paste as a {@code pcb-paste} group over the board, and a {@code pcb-stencil}
+     *       group, a foil reaching {@link #STENCIL_MARGIN_MM} beyond the board with the
+     *       paste apertures cut out. A viewer switches them on; a rasterised PNG never
+     *       shows either. Absent when the side has no paste layer.</li>
      * </ol>
      */
     public void renderRealisticJob(Job job, boolean topSide, Writer writer) throws IOException {
@@ -687,6 +723,7 @@ public class MultiLayerSvgRenderer {
         List<Artwork> copper = artworks(copperLayers, "cu", side, art, true);
         List<Artwork> soldermask = artworks(soldermaskLayers, "sm", side, art, false);
         List<Artwork> silkscreen = artworks(silkscreenLayers, "ss", side, art, false);
+        List<Artwork> paste = artworks(pasteLayers, "paste", side, art, false);
         // Only a hole that goes all the way through shows what is behind the board; a blind
         // one ends on an inner layer and is seen as a dimple in its pad.
         List<LayerInfo> throughLayers = new ArrayList<>();
@@ -749,6 +786,29 @@ public class MultiLayerSvgRenderer {
             writer.write("    <rect " + fullRect + " fill=\"black\"/>\n");
             for (Artwork a : soldermask) {
                 writer.write(useArtwork(a, "white", "black"));
+            }
+            writer.write("  </mask>\n");
+        }
+
+        // Paste and stencil. The paste artwork is used twice: as paste over the finished
+        // board, and in black to cut the apertures out of a stencil sheet, a square foil
+        // that reaches STENCIL_MARGIN_MM beyond the board so it still fills the view when
+        // zoomed out.
+        double stencilSide = Math.max(maxX - minX, maxY - minY)
+                + 2 * baseOptions.toOutputUnit(STENCIL_MARGIN_MM);
+        String stencilRect = String.format(Locale.US, "x=\"%.4f\" y=\"%.4f\" width=\"%.4f\" height=\"%.4f\"",
+                (minX + maxX) / 2 - stencilSide / 2, (minY + maxY) / 2 - stencilSide / 2,
+                stencilSide, stencilSide);
+        if (!paste.isEmpty()) {
+            for (Artwork a : paste) {
+                writeArtwork(a, art, writer);
+                if (a.needsMask()) writeLayerMask(a, fullRect, writer);
+            }
+            writer.write("  <mask id=\"stencil-mask\" maskUnits=\"userSpaceOnUse\" " + stencilRect
+                    + " maskContentUnits=\"userSpaceOnUse\">\n");
+            writer.write("    <rect " + stencilRect + " fill=\"white\"/>\n");
+            for (Artwork a : paste) {
+                writer.write(useArtwork(a, "black", "white"));
             }
             writer.write("  </mask>\n");
         }
@@ -846,6 +906,19 @@ public class MultiLayerSvgRenderer {
         }
 
         writer.write("  </g>\n"); // close board group
+
+        // 5. Paste and stencil, hidden until a viewer asks for them. They sit outside the
+        // outline clip because the stencil sheet reaches far beyond the board.
+        if (!paste.isEmpty()) {
+            writer.write("  <g class=\"pcb-paste\" data-stack-layer=\"paste\" display=\"none\">\n");
+            writeStackLayers(paste, PASTE_COLOR, null, fullRect, writer);
+            writer.write("  </g>\n");
+            writer.write("  <g class=\"pcb-stencil\" data-stack-layer=\"stencil\" display=\"none\">\n");
+            writer.write("    <rect " + stencilRect + " fill=\"" + STENCIL_COLOR
+                    + "\" mask=\"url(#stencil-mask)\"/>\n");
+            writer.write("  </g>\n");
+        }
+
         writer.write("</g>\n"); // close viewport
         writer.write("</svg>\n");
     }
@@ -1850,6 +1923,8 @@ public class MultiLayerSvgRenderer {
     }
 
     private String getLayerColor(String layerName, Matrix matrix) {
+        String override = layerName == null ? null : layerColors.get(layerName.toLowerCase(Locale.ROOT));
+        if (override != null) return override;
         if (matrix != null && matrix.getLayers() != null) {
             for (MatrixLayer ml : matrix.getLayers()) {
                 // Case-insensitive comparison

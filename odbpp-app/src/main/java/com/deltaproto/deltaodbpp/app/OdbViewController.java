@@ -2,6 +2,7 @@ package com.deltaproto.deltaodbpp.app;
 
 import com.deltaproto.deltaodbpp.OdbArchiveExtractor;
 import com.deltaproto.deltaodbpp.export.BomView;
+import com.deltaproto.deltaodbpp.export.LayerPalette;
 import com.deltaproto.deltaodbpp.export.LayerSideClassifier;
 import com.deltaproto.deltaodbpp.export.MultiLayerSvgRenderer;
 import com.deltaproto.deltaodbpp.export.SoldermaskColor;
@@ -133,7 +134,10 @@ public class OdbViewController {
             // on the layer/realistic views.
             SvgRenderOptions options = new SvgRenderOptions()
                     .withOutputUnit(SvgRenderOptions.OutputUnit.MM);
-            MultiLayerSvgRenderer renderer = new MultiLayerSvgRenderer(options);
+            // One palette colours both the artwork and the sidebar's layer dots.
+            Map<String, String> layerColors = layerColors(job);
+            MultiLayerSvgRenderer renderer = new MultiLayerSvgRenderer(options)
+                    .setLayerColors(layerColors);
             StringWriter svgWriter = new StringWriter();
             renderer.renderJob(job, svgWriter);
 
@@ -152,7 +156,7 @@ public class OdbViewController {
             List<BomView.Row> bill = BomView.build(job);
 
             // Build layer metadata
-            List<Map<String, String>> layers = buildLayerMetadata(job);
+            List<Map<String, String>> layers = buildLayerMetadata(job, layerColors);
 
             long elapsed = System.currentTimeMillis() - startTime;
             logger.info("Rendered {} in {}ms ({} layers, realistic: top={} bottom={}, components: top={} bottom={})",
@@ -396,7 +400,22 @@ public class OdbViewController {
         }
     }
 
-    private List<Map<String, String>> buildLayerMetadata(Job job) {
+    /**
+     * The colour of every layer of the first step, keyed by lower-case layer name: the
+     * KiCad palette for layers the matrix declares, its neutral grey for the rest.
+     */
+    private Map<String, String> layerColors(Job job) {
+        Map<String, String> colors = LayerPalette.kicad(job.getMatrix());
+        if (job.getSteps() == null || job.getSteps().isEmpty()) return colors;
+        Step step = job.getSteps().values().iterator().next();
+        if (step.getLayersByName() == null) return colors;
+        for (String name : step.getLayersByName().keySet()) {
+            colors.putIfAbsent(name.toLowerCase(Locale.ROOT), LayerPalette.OTHER);
+        }
+        return colors;
+    }
+
+    private List<Map<String, String>> buildLayerMetadata(Job job, Map<String, String> layerColors) {
         List<Map<String, String>> layers = new ArrayList<>();
         if (job.getSteps() == null || job.getSteps().isEmpty()) return layers;
 
@@ -427,18 +446,19 @@ public class OdbViewController {
         for (String key : matrixOrder) {
             String realName = stepLayerKeys.get(key);
             if (realName == null) continue;
-            layers.add(layerMeta(realName, matrixMap.get(key), sides));
+            layers.add(layerMeta(realName, matrixMap.get(key), sides, layerColors));
             emitted.add(key);
         }
         for (Map.Entry<String, String> entry : stepLayerKeys.entrySet()) {
             if (emitted.contains(entry.getKey())) continue;
-            layers.add(layerMeta(entry.getValue(), null, sides));
+            layers.add(layerMeta(entry.getValue(), null, sides, layerColors));
         }
 
         return layers;
     }
 
-    private Map<String, String> layerMeta(String layerName, MatrixLayer ml, LayerSideClassifier sides) {
+    private Map<String, String> layerMeta(String layerName, MatrixLayer ml, LayerSideClassifier sides,
+                                          Map<String, String> layerColors) {
         Map<String, String> meta = new HashMap<>();
         meta.put("name", layerName);
         meta.put("id", "layer-" + layerName.replaceAll("[^a-zA-Z0-9_-]", "_"));
@@ -447,6 +467,7 @@ public class OdbViewController {
         // Physical side (TOP / BOTTOM / INNER / NEITHER): the matrix context only says
         // BOARD or MISC, so the sidebar's Top / Bot filters need this.
         meta.put("side", sides.sideOf(layerName).name());
+        meta.put("color", layerColors.getOrDefault(layerName.toLowerCase(Locale.ROOT), LayerPalette.OTHER));
         return meta;
     }
 

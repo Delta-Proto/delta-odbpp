@@ -12,7 +12,10 @@
             --bg: #f2f2f2;
             --bg-card: #ffffff;
             --bg-input: #ffffff;
-            --bg-viewer: #e8e8e8;
+            /* The canvas and its grid are KiCad's (PCB editor background and grid colour) in
+               both themes: the layer colours are tuned for it and wash out on a light surface. */
+            --bg-viewer: #001023;
+            --viewer-inverse-bg: #d0d2cd;   /* board outline in the layers view (Edge.Cuts) */
             --fg: #262626;
             --fg-muted: #595959;
             --fg-faint: #999;
@@ -31,17 +34,19 @@
             --tooltip-shadow: rgba(0,0,0,0.1);
             --drag-tint: rgba(46,132,204,0.08);
             --loading-bg: rgba(255,255,255,0.95);
-            --grid-line: rgba(0,0,0,0.04);
+            --grid-line: rgba(132,132,132,0.5);
             --checkbox-accent: #2e84cc;
             --progress-from: #2e84cc;
             --progress-to: #5ba3dd;
             --spinner-track: #d9d9d9;
+            /* Height of the layer sheet's handle on a phone — the part that stays on screen. */
+            --sheet-peek: 60px;
         }
         .dark {
             --bg: #1a1a1a;
             --bg-card: #1f1f1f;
             --bg-input: #2a2a2a;
-            --bg-viewer: #141414;
+            --bg-viewer: #001023;
             --fg: #d9d9d9;
             --fg-muted: #8c8c8c;
             --fg-faint: #666;
@@ -60,7 +65,7 @@
             --tooltip-shadow: rgba(0,0,0,0.5);
             --drag-tint: rgba(46,132,204,0.1);
             --loading-bg: rgba(31,31,31,0.95);
-            --grid-line: rgba(255,255,255,0.03);
+            --grid-line: rgba(132,132,132,0.5);
             --checkbox-accent: #2e84cc;
             --progress-from: #2e84cc;
             --progress-to: #5ba3dd;
@@ -71,7 +76,7 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--bg); color: var(--fg); height: 100vh;
+            background: var(--bg); color: var(--fg); height: 100vh; height: 100dvh;
             display: flex; flex-direction: column; transition: background 0.2s, color 0.2s;
         }
 
@@ -146,8 +151,20 @@
         .sidebar {
             width: 280px; flex-shrink: 0; background: var(--bg-card);
             border-right: 1px solid var(--border);
-            padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px;
+            padding: 16px; display: flex; flex-direction: column; gap: 8px; min-height: 0;
         }
+        /* The heading stays put; only the body under it scrolls. */
+        .sidebar-head { flex-shrink: 0; }
+        .layers-heading { display: flex; align-items: center; gap: 8px; }
+        .layer-count { color: var(--fg-faint); font-weight: 400; }
+        .layer-count:empty { display: none; }
+        .sheet-grip, .sheet-chevron { display: none; }
+        .sidebar-body {
+            flex: 1; min-height: 0; overflow-y: auto;
+            display: flex; flex-direction: column; gap: 16px;
+        }
+        #file-info-container { flex-shrink: 0; margin-bottom: 8px; }
+        #file-info-container:empty { display: none; }
         .sidebar-resizer {
             width: 5px; flex-shrink: 0; cursor: col-resize; background: transparent;
             transition: background 0.15s; margin-left: -3px; z-index: 10; position: relative;
@@ -163,19 +180,29 @@
         /* ===== View Tabs ===== */
         .view-tabs {
             display: flex; gap: 2px; padding: 8px 16px; background: var(--bg-card);
-            border-bottom: 1px solid var(--border); flex-wrap: wrap; row-gap: 4px;
+            border-bottom: 1px solid var(--border);
         }
         .view-tab {
             background: transparent; color: var(--fg-muted); border: none; padding: 8px 12px;
             border-radius: 8px 8px 0 0; cursor: pointer; font-size: 0.8125rem;
             transition: background 0.15s, color 0.15s; font-family: inherit; font-weight: 500;
             display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-            white-space: nowrap;
         }
         .view-tab:hover { background: var(--item-hover); color: var(--fg); }
         .view-tab.active { background: var(--tab-active-bg); color: var(--primary); font-weight: 600; }
         .view-tab:disabled { cursor: not-allowed; opacity: 0.4; }
         .view-tab svg { width: 14px; height: 14px; flex-shrink: 0; }
+        /* Paste row under the tabs, shown with the realistic views: paste on/off, as a stencil,
+           and how opaque. */
+        .paste-controls {
+            display: flex; align-items: center; gap: 18px; padding: 6px 16px;
+            background: var(--bg-card); border-bottom: 1px solid var(--border);
+            font-size: 0.8125rem; color: var(--fg-muted);
+        }
+        .paste-opt { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+        .paste-opt input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--checkbox-accent); margin: 0; }
+        .paste-opt input[type="range"] { width: 120px; accent-color: var(--primary); margin: 0; }
+        .paste-controls.unavailable .paste-opt { opacity: 0.4; cursor: not-allowed; }
         /* Soldermask color swatches — pick the realistic view's mask color. */
         .soldermask-swatches {
             display: inline-flex; align-items: center; gap: 5px;
@@ -200,7 +227,7 @@
             padding: 2px 8px; border-radius: 6px; cursor: pointer; font-size: 0.6875rem;
             transition: background 0.15s, color 0.15s; font-family: inherit; font-weight: 500;
         }
-        .side-btn:hover { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
+        .side-btn:hover, .side-btn.active { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
         .layer-list { display: flex; flex-direction: column; gap: 3px; }
         .layer-item {
             display: flex; align-items: center; gap: 10px; padding: 8px 10px;
@@ -242,7 +269,7 @@
         /* What one grid square means — small, out of the way, never in the pointer's path. */
         .grid-hint {
             position: absolute; left: 12px; bottom: 10px; z-index: 1;
-            font-size: 0.6875rem; color: var(--fg-faint); pointer-events: none;
+            font-size: 0.6875rem; color: #8492a6; pointer-events: none;
             font-variant-numeric: tabular-nums;
         }
         /* Components drawn over the realistic board: translucent so the pads show through,
@@ -267,7 +294,10 @@
         .comp-hovercard dt { color: var(--fg-muted); white-space: nowrap; }
         .comp-hovercard dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
         .comp-hovercard .desc { margin-top: 6px; color: var(--fg-muted); font-style: italic; }
-        #svg-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: grab; }
+        #svg-container {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: grab;
+            touch-action: none; user-select: none; -webkit-user-select: none;
+        }
         #svg-container:active { cursor: grabbing; }
         #svg-content { transform-origin: 0 0; }
         #data-panel {
@@ -275,18 +305,25 @@
             overflow: auto; background: var(--bg);
         }
         #data-panel.hidden { display: none; }
+        /* An opaque card on top of the grid: the canvas is navy in both themes, and faint,
+           translucent text on it read as part of the grid rather than as an invitation. */
         .drop-zone {
-            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            text-align: center; color: var(--fg-faint);
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2;
+            text-align: center; color: var(--fg-muted);
+            background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
+            padding: 36px 48px; box-shadow: 0 4px 12px var(--tooltip-shadow);
         }
-        .drop-zone svg { width: 80px; height: 80px; margin-bottom: 16px; opacity: 0.4; }
-        .drop-zone p { font-size: 1.1rem; margin-bottom: 8px; }
-        .drop-zone small { font-size: 0.85rem; color: var(--fg-faint); }
+        .drop-zone svg { width: 80px; height: 80px; margin-bottom: 16px; }
+        .drop-zone p { font-size: 1.1rem; margin-bottom: 8px; color: var(--fg); }
+        .drop-zone small { font-size: 0.85rem; color: var(--fg-muted); }
+        /* A message in place of the artwork ("no realistic view"), readable on the navy canvas. */
+        .viewer-note { color: #9aa7b8; text-align: center; padding: 40px; }
         .drag-over { background: var(--drag-tint) !important; }
         .loading {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             text-align: center; background: var(--loading-bg); padding: 32px 48px;
             border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.15); border: 1px solid var(--border);
+            z-index: 3;
         }
         .spinner {
             width: 48px; height: 48px; border: 3px solid var(--spinner-track);
@@ -442,6 +479,89 @@
             color: var(--fg-muted);
         }
         .dp-stack-note { text-align: right; padding: 0 11px; color: var(--fg-faint); font-size: 0.75rem; }
+
+        /* ===== Phone layout ===== */
+        /* The canvas takes the whole screen under the header and tabs; the sidebar becomes a
+           sheet docked at the bottom, its heading (select all, Top / Bot) always in reach, the
+           layer list sliding up over the board when the heading is tapped or swiped. */
+        @media (max-width: 768px) {
+            header { padding: 8px 12px; gap: 8px; height: 52px; }
+            .app-version { display: none; }
+            .upload-btn { padding: 9px 12px; white-space: nowrap; }
+            .example-btn { padding: 9px 2px; white-space: nowrap; }
+
+            .main-container { flex-direction: column; position: relative; }
+            .sidebar-resizer { display: none; }
+            .sidebar {
+                position: fixed; left: 0; right: 0; bottom: 0; width: auto !important;
+                height: 72vh; height: 72dvh; z-index: 20;
+                border-right: none; border-top: 1px solid var(--border);
+                border-radius: 14px 14px 0 0; padding: 0 12px 12px;
+                box-shadow: 0 -4px 16px var(--tooltip-shadow);
+                transform: translateY(calc(100% - var(--sheet-peek)));
+                transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+                gap: 0;
+            }
+            .sidebar.open { transform: translateY(0); }
+            /* The handle comes first in the sheet; the name of the open file moves under it. */
+            .sidebar-head {
+                order: 0; height: var(--sheet-peek); display: flex; flex-direction: column;
+                justify-content: center; gap: 6px; cursor: pointer; touch-action: none;
+                user-select: none; -webkit-user-select: none;
+            }
+            #file-info-container { order: 1; }
+            .sidebar-body { order: 2; padding-bottom: 8px; }
+            .sheet-grip {
+                display: block; width: 40px; height: 4px; border-radius: 2px;
+                background: var(--border); margin: 0 auto;
+            }
+            .sheet-chevron {
+                display: block; width: 20px; height: 20px; color: var(--fg-muted);
+                flex-shrink: 0; transition: transform 0.28s;
+            }
+            .sidebar.open .sheet-chevron { transform: rotate(180deg); }
+            .layer-item { padding: 10px 10px; }
+            .layer-item .name { font-size: 0.875rem; }
+            .layer-item .name:hover::after { display: none; }
+            .side-btn { padding: 6px 10px; font-size: 0.75rem; }
+
+            /* One row of tabs that scrolls sideways instead of wrapping into three. */
+            .view-tabs {
+                flex-wrap: nowrap; overflow-x: auto; padding: 6px 8px; gap: 2px;
+                scrollbar-width: none; -webkit-overflow-scrolling: touch;
+            }
+            .view-tabs::-webkit-scrollbar { display: none; }
+            .view-tab { white-space: nowrap; flex-shrink: 0; padding: 9px 12px; }
+            .view-tabs .tab-spacer { display: none; }
+            .soldermask-swatches { flex-shrink: 0; }
+            .sm-swatch { width: 22px; height: 22px; }
+            .paste-controls { gap: 14px; padding: 6px 10px; flex-wrap: wrap; }
+
+            .zoom-controls { top: 8px; right: 8px; gap: 6px; }
+            .zoom-btn { width: 40px; height: 40px; font-size: 1.25rem; }
+            .zoom-level { padding: 10px 6px; min-width: 56px; }
+            .grid-hint { bottom: calc(var(--sheet-peek) + 8px); left: 10px; }
+            .drop-zone {
+                padding: 24px 24px; width: min(86vw, 360px);
+                margin-top: calc(var(--sheet-peek) / -2);
+            }
+            .drop-zone svg { width: 64px; height: 64px; }
+            .loading { padding: 24px 28px; width: min(86vw, 360px); }
+            .comp-hovercard { max-width: min(340px, 86vw); }
+
+            /* Stackup and BOM end above the sheet's handle rather than under it. */
+            #data-panel { height: calc(100% - var(--sheet-peek)); }
+            .dp-spec-sheet { padding: 12px 10px; overflow-x: auto; }
+            .dp-table { min-width: 540px; }
+            .bom-toolbar { padding: 8px 10px; gap: 8px; }
+            .bom-search { min-width: 140px; }
+            .bom-table { width: max-content; min-width: 100%; }
+            .bom-table thead th { white-space: nowrap; }
+            .bom-table .description { max-width: 260px; }
+        }
+        @media (max-width: 520px) {
+            header h1 { display: none; }
+        }
     </style>
 </head>
 <body class="dark">
@@ -485,28 +605,31 @@
     </header>
 
     <div class="main-container">
-        <aside class="sidebar">
+        <aside class="sidebar" id="sidebar">
             <div id="file-info-container"></div>
-
-            <div>
-                <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+            <!-- On a phone the sidebar is a sheet docked under the canvas: this head is the part
+                 that stays visible, and tapping or swiping it slides the rest up over the board. -->
+            <div class="sidebar-head" id="sidebar-head" aria-expanded="false">
+                <div class="sheet-grip" aria-hidden="true"></div>
+                <div class="layers-heading">
                     <input type="checkbox" id="select-all-layers" onclick="toggleAllLayers()"
                         style="width:16px; height:16px; accent-color:var(--checkbox-accent);">
-                    <h2 style="margin-bottom:0;">Layers</h2>
+                    <h2 style="margin-bottom:0;">Layers <span class="layer-count" id="layer-count"></span></h2>
                     <div style="display:flex; gap:4px; margin-left:auto;">
-                        <button class="side-btn" onclick="selectSide('TOP')" title="Show top layers only">Top</button>
-                        <button class="side-btn" onclick="selectSide('BOTTOM')" title="Show bottom layers only">Bot</button>
+                        <button class="side-btn" id="side-top" onclick="selectSide('TOP')" title="Show top layers only">Top</button>
+                        <button class="side-btn" id="side-bottom" onclick="selectSide('BOTTOM')" title="Show bottom layers only, seen from the bottom">Bot</button>
                     </div>
+                    <svg class="sheet-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg>
                 </div>
+            </div>
+            <div class="sidebar-body">
                 <div class="layer-list" id="layer-list">
                     <div class="no-layers">No layers loaded</div>
                 </div>
-            </div>
-
-            <div id="recent-section">
-                <h2>Recent Projects</h2>
-                <div class="recent-projects" id="recent-list">
-                    <div class="no-layers">No recent projects</div>
+                <div id="recent-section" class="hidden">
+                    <h2>Recent Projects</h2>
+                    <div class="recent-projects" id="recent-list"></div>
                 </div>
             </div>
         </aside>
@@ -530,7 +653,7 @@
                     <button class="sm-swatch"        data-color="white"  style="background:#f7f9fe" onclick="setSoldermask('white')"  title="White"></button>
                     <button class="sm-swatch"        data-color="black"  style="background:#0f1010" onclick="setSoldermask('black')"  title="Black"></button>
                 </span>
-                <span style="flex:1"></span>
+                <span class="tab-spacer" style="flex:1"></span>
                 <button class="view-tab" id="gerber-btn" onclick="downloadGerber()" disabled
                     title="Convert to Gerber X2 + Excellon and download as zip">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -562,6 +685,17 @@
                     <span>PNG Bottom</span>
                 </button>
             </div>
+            <div class="paste-controls hidden" id="paste-controls">
+                <label class="paste-opt" id="paste-label" title="Show the solder paste of this side over the board">
+                    <input type="checkbox" id="paste-toggle" onchange="setPasteShown(this.checked)"> Paste
+                </label>
+                <label class="paste-opt" id="stencil-label" title="Show the paste as a stencil: a foil with the apertures cut out">
+                    <input type="checkbox" id="stencil-toggle" onchange="setStencil(this.checked)"> Stencil
+                </label>
+                <label class="paste-opt" title="Opacity of the paste or the stencil">
+                    Opacity <input type="range" id="paste-opacity" min="0" max="100" value="85" oninput="setPasteOpacity(this.value)">
+                </label>
+            </div>
             <div class="viewer-container" id="viewer-container">
                 <div class="zoom-controls">
                     <button class="zoom-btn" id="zoom-out" title="Zoom Out">-</button>
@@ -569,7 +703,7 @@
                     <button class="zoom-btn" id="zoom-in" title="Zoom In">+</button>
                     <button class="zoom-btn" id="zoom-fit" title="Fit to View">&#8644;</button>
                 </div>
-                <div class="grid-hint" id="grid-hint">Grid 10 &times; 10 mm</div>
+                <div class="grid-hint" id="grid-hint">Grid 10 &times; 10 mm<span id="view-hint"></span></div>
                 <div class="comp-hovercard hidden" id="comp-hovercard"></div>
                 <div class="drop-zone" id="drop-zone">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
@@ -640,7 +774,8 @@
         let scale = 1, panX = 0, panY = 0, isPanning = false, startX, startY;
         let db = null;
 
-        // Layer type colors (matching ODB++ matrix types)
+        // Fallback layer colours by matrix type; the server sends each layer's own colour
+        // (the palette it painted the layers view with) and that one wins.
         const LAYER_TYPE_COLORS = {
             'SIGNAL': '#CC0000', 'POWER_GROUND': '#0000CC', 'MIXED': '#6600CC',
             'SOLDER_MASK': '#00CC00', 'SILK_SCREEN': '#FFFF00', 'SOLDER_PASTE': '#FF6600',
@@ -649,14 +784,11 @@
         };
 
         const LAYER_TYPE_LABELS = {
-            'SIGNAL': 'Signal', 'POWER_GROUND': 'Power', 'MIXED': 'Mixed',
+            'SIGNAL': 'Cu', 'POWER_GROUND': 'Plane', 'MIXED': 'Cu',
             'SOLDER_MASK': 'Mask', 'SILK_SCREEN': 'Silk', 'SOLDER_PASTE': 'Paste',
             'DRILL': 'Drill', 'ROUT': 'Rout', 'DOCUMENT': 'Doc',
             'COMPONENT': 'Comp', 'DIELECTRIC': 'Diel', 'PROFILE': 'Profile'
         };
-
-        const TOP_TYPES_CONTEXTS = ['TOP'];
-        const BOTTOM_TYPES_CONTEXTS = ['BOTTOM'];
 
         // DOM refs
         const fileInput = document.getElementById('file-input');
@@ -764,8 +896,10 @@
         async function renderRecentProjects() {
             const list = document.getElementById('recent-list');
             const projects = await getRecentProjects();
+            // No heading over an empty list: the section appears with the first project.
+            document.getElementById('recent-section').classList.toggle('hidden', projects.length === 0);
             if (projects.length === 0) {
-                list.innerHTML = '<div class="no-layers">No recent projects</div>';
+                list.innerHTML = '';
                 return;
             }
             list.innerHTML = projects.map(p => {
@@ -856,7 +990,7 @@
                     type: meta.type || 'DOCUMENT',
                     context: meta.context || '',
                     side: meta.side || '',
-                    color: LAYER_TYPE_COLORS[meta.type] || '#888888',
+                    color: meta.color || LAYER_TYPE_COLORS[meta.type] || '#888888',
                     visible: true,
                     index
                 }));
@@ -906,6 +1040,7 @@
                 currentView = 'layers';
                 document.querySelectorAll('.view-tab').forEach(t =>
                     t.classList.toggle('active', t.dataset.view === 'layers'));
+                document.getElementById('paste-controls').classList.add('hidden');
                 renderSvg();
                 renderLayerList();
                 fitToView();
@@ -1044,8 +1179,8 @@
                 svgStr = realisticBottomSvg || componentsBottomSvg;
                 overlayStr = realisticBottomSvg ? componentsBottomSvg : null;
             }
-            else if (currentView === 'stackup') { viewerContainer.classList.add('data-view'); renderStackup(); return; }
-            else if (currentView === 'bom') { viewerContainer.classList.add('data-view'); renderBom(); return; }
+            else if (currentView === 'stackup') { viewerContainer.classList.add('data-view'); setViewHint(''); renderStackup(); return; }
+            else if (currentView === 'bom') { viewerContainer.classList.add('data-view'); setViewHint(''); renderBom(); return; }
 
             // SVG views live in the pan/zoom container
             viewerContainer.classList.remove('data-view');
@@ -1057,7 +1192,8 @@
                 const msg = currentView.startsWith('comp-')
                     ? 'No components on this side.<br><small>The EDA data may be missing or the archive has no placed components.</small>'
                     : 'No realistic view available.<br><small>The board profile or layer types may not be recognized.</small>';
-                svgContent.innerHTML = '<div style="color:var(--fg-faint);text-align:center;padding:40px;">' + msg + '</div>';
+                svgContent.innerHTML = '<div class="viewer-note">' + msg + '</div>';
+                setViewHint('');
                 return;
             }
 
@@ -1077,11 +1213,79 @@
 
                 if (overlayStr) overlayComponents(svg, overlayStr);
                 applySoldermaskColor(svg);
+                if (currentView === 'top' || currentView === 'bottom') applyPasteOverlay(svg);
 
                 svgContent.innerHTML = '';
                 svgContent.appendChild(svg);
+                // The layers view is rebuilt from the server's SVG each time: put the layer
+                // selection back on it, and with it the side the board is seen from.
+                if (currentView === 'layers') applyLayerVisibility();
+                else setViewHint(currentView.endsWith('bottom') ? 'Bottom view' : 'Top view');
             }
             updateTransform();
+        }
+
+        // ===== Paste and stencil =====
+        // The realistic renders carry the side's solder paste twice, both hidden: as deposits on
+        // the pads and as a stencil foil with the apertures cut out. The row under the tabs
+        // picks one; hovering an option previews it without committing.
+        const pasteView = {shown: false, stencil: false, opacity: 0.85, hover: null};
+
+        function applyPasteOverlay(svg) {
+            const controls = document.getElementById('paste-controls');
+            const paste = svg && svg.querySelector('.pcb-paste');
+            const stencil = svg && svg.querySelector('.pcb-stencil');
+            const available = !!paste;
+            controls.classList.toggle('unavailable', !available);
+            controls.querySelectorAll('input').forEach(i => i.disabled = !available);
+            controls.title = available ? '' : 'This side has no paste layer';
+            if (!available) return;
+            const shown = pasteView.shown || pasteView.hover !== null;
+            const asStencil = pasteView.hover !== null ? pasteView.hover === 'stencil' : pasteView.stencil;
+            paste.setAttribute('display', shown && !asStencil ? 'inline' : 'none');
+            paste.setAttribute('opacity', pasteView.opacity);
+            if (stencil) {
+                stencil.setAttribute('display', shown && asStencil ? 'inline' : 'none');
+                stencil.setAttribute('opacity', pasteView.opacity);
+            }
+        }
+
+        function refreshPasteOverlay() {
+            if (currentView === 'top' || currentView === 'bottom') applyPasteOverlay(svgContent.querySelector('svg'));
+        }
+
+        function setPasteShown(on) {
+            pasteView.shown = on;
+            if (!on) { pasteView.stencil = false; document.getElementById('stencil-toggle').checked = false; }
+            refreshPasteOverlay();
+        }
+
+        function setStencil(on) {
+            pasteView.stencil = on;
+            if (on && !pasteView.shown) { pasteView.shown = true; document.getElementById('paste-toggle').checked = true; }
+            refreshPasteOverlay();
+        }
+
+        function setPasteOpacity(percent) {
+            pasteView.opacity = Math.max(0, Math.min(100, Number(percent))) / 100;
+            refreshPasteOverlay();
+        }
+
+        (function initPasteHover() {
+            if (window.matchMedia('(hover: none)').matches) return;
+            // (Keyed object rather than nested array literals: two opening brackets in a row
+            // are an inline expression to the template engine.)
+            const labels = {'paste-label': 'paste', 'stencil-label': 'stencil'};
+            for (const [id, mode] of Object.entries(labels)) {
+                const label = document.getElementById(id);
+                label.addEventListener('mouseenter', () => { pasteView.hover = mode; refreshPasteOverlay(); });
+                label.addEventListener('mouseleave', () => { pasteView.hover = null; refreshPasteOverlay(); });
+            }
+        })();
+
+        /** The note after the grid size: which side the board is seen from. */
+        function setViewHint(text) {
+            document.getElementById('view-hint').textContent = text ? ' \u00b7 ' + text : '';
         }
 
         // ===== Soldermask color =====
@@ -1201,15 +1405,16 @@
             let x = e.clientX - rect.left + pad;
             let y = e.clientY - rect.top + pad;
             const cw = hoverCard.offsetWidth, ch = hoverCard.offsetHeight;
+            const height = rect.height - sheetPeek();   // on a phone the layer sheet covers the bottom
             if (x + cw > rect.width - 8) x = e.clientX - rect.left - cw - pad;
-            if (y + ch > rect.height - 8) y = e.clientY - rect.top - ch - pad;
+            if (y + ch > height - 8) y = e.clientY - rect.top - ch - pad;
             hoverCard.style.left = Math.max(4, x) + 'px';
             hoverCard.style.top = Math.max(4, y) + 'px';
         }
 
-        function compUnderPointer(e) {
-            const el = e.target instanceof Element ? e.target : null;
-            if (!el) return null;
+        /** The component drawn at an element of the render, or null: a body, or its designator. */
+        function compAt(el) {
+            if (!(el instanceof Element)) return null;
             const label = el.closest('[data-refdes-label]');
             if (label) {
                 const rd = label.getAttribute('data-refdes-label');
@@ -1218,10 +1423,8 @@
             return el.closest('[data-refdes]');
         }
 
-        svgContent.addEventListener('mousemove', (e) => {
-            if (!currentView.startsWith('comp-') || isPanning) { if (hoveredComp) hideHoverCard(); return; }
-            const comp = compUnderPointer(e);
-            if (!comp) { hideHoverCard(); return; }
+        /** Shows the card for a component at a pointer position ({clientX, clientY}). */
+        function showCompCard(comp, at) {
             const refdes = comp.getAttribute('data-refdes') || comp.getAttribute('data-refdes-label');
             if (comp !== hoveredComp) {
                 if (hoveredComp) hoveredComp.classList.remove('comp-hover');
@@ -1230,8 +1433,24 @@
                 hoverCard.innerHTML = hoverCardHtml(refdes, placementIndex.get(refdes));
                 hoverCard.classList.remove('hidden');
             }
-            positionHoverCard(e);
+            positionHoverCard(at);
+        }
+
+        // With a mouse the card follows the pointer; a finger has no hover, so there a tap on a
+        // component shows it and a tap beside one puts it away (see the pan & zoom handlers).
+        svgContent.addEventListener('pointermove', (e) => {
+            if (e.pointerType !== 'mouse') return;
+            if (!currentView.startsWith('comp-') || isPanning) { if (hoveredComp) hideHoverCard(); return; }
+            const comp = compAt(e.target);
+            if (!comp) { hideHoverCard(); return; }
+            showCompCard(comp, e);
         });
+        function tapComponent(x, y) {
+            if (!currentView.startsWith('comp-')) return;
+            const comp = compAt(document.elementFromPoint(x, y));
+            if (comp && comp !== hoveredComp) showCompCard(comp, {clientX: x, clientY: y});
+            else hideHoverCard();
+        }
         svgContent.addEventListener('mouseleave', hideHoverCard);
 
         // BOM designator pills use the same card, in its table mode.
@@ -1259,6 +1478,10 @@
             currentView = view;
             document.querySelectorAll('.view-tab').forEach(t =>
                 t.classList.toggle('active', t.dataset.view === view));
+            document.getElementById('paste-controls').classList.toggle('hidden', view !== 'top' && view !== 'bottom');
+            // On a phone the tab row scrolls sideways: keep the chosen tab in it.
+            const tab = document.querySelector(`.view-tab[data-view="${view}"]`);
+            if (tab && tab.scrollIntoView) tab.scrollIntoView({block: 'nearest', inline: 'nearest'});
             renderSvg();
             // Pan/zoom fit only applies to SVG views; stackup/bom render to a normal scrollable panel.
             if (view !== 'stackup' && view !== 'bom') fitToView();
@@ -1564,21 +1787,32 @@
         let visibilityBeforeHover = null;
 
         function renderLayerList() {
+            document.getElementById('layer-count').textContent = layers.length ? '(' + layers.length + ')' : '';
+            updateSideButtons();
             if (layers.length === 0) {
                 layerList.innerHTML = '<div class="no-layers">No layers loaded</div>';
                 return;
             }
+            let inner = 0;
             layerList.innerHTML = layers.map((layer, index) => {
+                // "Cu Top", "Mask Bot", "Cu Inner 2"; layers on no side say so only when they
+                // are not board layers at all ("Doc Misc").
                 const label = LAYER_TYPE_LABELS[layer.type] || layer.type;
-                const ctx = layer.context ? ` ${layer.context.charAt(0)}${layer.context.slice(1).toLowerCase()}` : '';
+                let where = '';
+                if (layer.side === 'TOP') where = ' Top';
+                else if (layer.side === 'BOTTOM') where = ' Bot';
+                else if (layer.side === 'INNER' && isCopperLayer(layer)) where = ' Inner ' + (++inner);
+                else if (layer.context === 'MISC') where = ' Misc';
+                const detail = [layer.type, layer.context, layer.side].filter(Boolean).join(' \u00b7 ');
+                const name = escapeHtml(layer.name);
                 return `<div class="layer-item" data-index="${index}"
                         onmouseenter="hoverLayerStart(${index})"
                         onmouseleave="hoverLayerEnd()">
                     <input type="checkbox" ${layer.visible ? 'checked' : ''}
                         onclick="event.stopPropagation(); toggleLayer(${index})">
                     <div class="color-dot" style="background: ${layer.color}"></div>
-                    <span class="name" title="${layer.name}" onclick="toggleLayer(${index})" style="cursor:pointer">${layer.name}</span>
-                    <span class="layer-type-badge">${label}${ctx}</span>
+                    <span class="name" title="${name.replace(/"/g, '&quot;')}" onclick="toggleLayer(${index})" style="cursor:pointer">${name}</span>
+                    <span class="layer-type-badge" title="${escapeHtml(detail)}">${escapeHtml(label + where)}</span>
                 </div>`;
             }).join('');
             updateSelectAllCheckbox();
@@ -1600,15 +1834,92 @@
             renderLayerList();
         }
 
+        function isCopperLayer(l) {
+            return l.type === 'SIGNAL' || l.type === 'POWER_GROUND' || l.type === 'MIXED';
+        }
+
+        /** Drill, rout and profile layers belong to the board, not to one side of it. */
+        function isSharedLayer(l) {
+            return l.type === 'DRILL' || l.type === 'ROUT' || l.type === 'PROFILE';
+        }
+        function isOnSide(l, side) { return l.side === side && !isSharedLayer(l); }
+
+        /** What Top / Bot show: that side's own layers plus the ones every side shares. */
+        function sidePick(side) {
+            return layers.filter(l => isOnSide(l, side) || isSharedLayer(l));
+        }
+
         function selectSide(side) {
-            layers.forEach(l => {
-                const isDrill = l.type === 'DRILL' || l.type === 'ROUT';
-                const isProfile = l.type === 'PROFILE';
-                const matchesSide = l.side === side;
-                l.visible = isDrill || isProfile || matchesSide;
-            });
+            const pick = sidePick(side);
+            layers.forEach(l => { l.visible = pick.includes(l); });
             applyLayerVisibility();
             renderLayerList();
+        }
+
+        /** The side whose pick is exactly what is visible now, or null. */
+        function selectedSide() {
+            const visible = layers.filter(l => l.visible);
+            for (const side of ['TOP', 'BOTTOM']) {
+                const pick = sidePick(side);
+                if (pick.some(l => isOnSide(l, side)) && pick.length === visible.length && pick.every(l => l.visible)) {
+                    return side;
+                }
+            }
+            return null;
+        }
+
+        function updateSideButtons() {
+            const side = selectedSide();
+            document.getElementById('side-top').classList.toggle('active', side === 'TOP');
+            document.getElementById('side-bottom').classList.toggle('active', side === 'BOTTOM');
+        }
+
+        /** True when only bottom-side layers (and shared ones) are showing. */
+        function bottomSideShown() {
+            const visible = layers.filter(l => l.visible);
+            return visible.some(l => isOnSide(l, 'BOTTOM'))
+                && visible.every(l => isOnSide(l, 'BOTTOM') || isSharedLayer(l));
+        }
+
+        /**
+         * The layers view shows the board from above, bottom layers seen through it — until only
+         * the bottom side is left, and then it turns the board over so the artwork reads the way
+         * it does on the real thing. (The realistic bottom view arrives mirrored already.)
+         */
+        function viewFlipped() {
+            return currentView === 'layers' && bottomSideShown();
+        }
+
+        /**
+         * Paints the layers view the way the board is stacked for whoever is looking at it: the
+         * side facing the viewer last, so its copper lies over the inner planes instead of under
+         * them. Layers on no side (drawings), then drills, then the outline go on top of all.
+         */
+        function orderLayerArtwork(svg, fromBottom) {
+            const order = fromBottom ? 'bottom' : 'top';
+            if (svg.dataset.paintOrder === order) return;
+            svg.dataset.paintOrder = order;
+            const stacked = layers.filter(l => !isSharedLayer(l) && ['TOP', 'INNER', 'BOTTOM'].includes(l.side));
+            if (!fromBottom) stacked.reverse();   // the list runs top to bottom
+            const loose = layers.filter(l => !isSharedLayer(l) && !stacked.includes(l));
+            const shared = layers.filter(isSharedLayer);
+            const groups = [...stacked, ...loose, ...shared]
+                .map(l => svg.querySelector(`#${CSS.escape(l.id)}`))
+                .concat(svg.querySelector('#layer-profile'))
+                .filter(Boolean);
+            for (const g of groups) g.parentNode.appendChild(g);
+        }
+
+        function setViewportFlip(svg, flip) {
+            orderLayerArtwork(svg, flip);
+            const vb = svg.getAttribute('viewBox');
+            const viewport = svg.querySelector('#viewport') || svg.querySelector(':scope > g');
+            if (!vb || !viewport) return;
+            if (viewport.dataset.transform === undefined) viewport.dataset.transform = viewport.getAttribute('transform') || '';
+            const [vx, , vw] = vb.split(/[\s,]+/).map(Number);
+            const base = viewport.dataset.transform;
+            viewport.setAttribute('transform', flip ? `translate(${vx + vw + vx}, 0) scale(-1, 1) ${base}` : base);
+            setViewHint(flip ? 'Bottom view' : 'Top view');
         }
 
         function toggleLayer(index) {
@@ -1623,9 +1934,13 @@
                 const el = svgContent.querySelector(`#${CSS.escape(layer.id)}`);
                 if (el) el.setAttribute('display', layer.visible ? 'inline' : 'none');
             }
+            const svg = svgContent.querySelector('svg');
+            if (svg) setViewportFlip(svg, viewFlipped());
         }
 
         function hoverLayerStart(index) {
+            // A finger has no hover: the events a tap synthesises would solo the layer for good.
+            if (window.matchMedia('(hover: none)').matches) return;
             if (currentView !== 'layers') return;
             visibilityBeforeHover = layers.map(l => l.visible);
             for (let i = 0; i < layers.length; i++) {
@@ -1644,41 +1959,102 @@
         }
 
         // ===== Pan & Zoom =====
-        svgContainer.addEventListener('mousedown', (e) => {
-            if (e.button === 0) { isPanning = true; startX = e.clientX - panX; startY = e.clientY - panY; }
+        // Pointer events cover mouse, pen and touch alike: one pointer pans, two pinch-zoom
+        // about their midpoint, the wheel zooms about the cursor.
+        const MIN_SCALE = 0.1, MAX_SCALE = 50, TAP_SLOP_PX = 8;
+        const pointers = new Map();
+        let pinch = null, tap = null;
+
+        function zoomAbout(cx, cy, ns) {
+            ns = Math.max(MIN_SCALE, Math.min(MAX_SCALE, ns));
+            panX = cx - (cx - panX) * (ns / scale);
+            panY = cy - (cy - panY) * (ns / scale);
+            scale = ns;
+            updateTransform();
+        }
+
+        function beginPan(p) { isPanning = true; startX = p.x - panX; startY = p.y - panY; }
+
+        svgContainer.addEventListener('pointerdown', (e) => {
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
+            svgContainer.setPointerCapture(e.pointerId);
+            pointers.set(e.pointerId, {x: e.clientX, y: e.clientY});
+            if (pointers.size === 1) {
+                beginPan(pointers.get(e.pointerId));
+                tap = e.pointerType === 'mouse' ? null : {id: e.pointerId, x: e.clientX, y: e.clientY};
+            } else if (pointers.size === 2) {
+                isPanning = false;
+                tap = null;
+                const [a, b] = [...pointers.values()];
+                pinch = {dist: Math.hypot(a.x - b.x, a.y - b.y), scale, panX, panY,
+                         mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2};
+            }
+            e.preventDefault();
         });
-        document.addEventListener('mousemove', (e) => {
-            if (isPanning) { panX = e.clientX - startX; panY = e.clientY - startY; updateTransform(); }
+        svgContainer.addEventListener('pointermove', (e) => {
+            if (!pointers.has(e.pointerId)) return;
+            pointers.set(e.pointerId, {x: e.clientX, y: e.clientY});
+            if (tap && tap.id === e.pointerId && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > TAP_SLOP_PX) {
+                tap = null;          // a drag, not a tap: the card would be left behind
+                hideHoverCard();
+            }
+            if (pinch && pointers.size >= 2) {
+                const [a, b] = [...pointers.values()];
+                const rect = svgContainer.getBoundingClientRect();
+                const dist = Math.hypot(a.x - b.x, a.y - b.y);
+                if (dist < 1) return;
+                const ns = Math.max(MIN_SCALE, Math.min(MAX_SCALE, pinch.scale * dist / pinch.dist));
+                // Keep the board point that was under the fingers' midpoint under it still.
+                const m0x = pinch.mx - rect.left, m0y = pinch.my - rect.top;
+                const mx = (a.x + b.x) / 2 - rect.left, my = (a.y + b.y) / 2 - rect.top;
+                panX = mx - (m0x - pinch.panX) * (ns / pinch.scale);
+                panY = my - (m0y - pinch.panY) * (ns / pinch.scale);
+                scale = ns;
+                updateTransform();
+            } else if (isPanning) {
+                panX = e.clientX - startX; panY = e.clientY - startY;
+                updateTransform();
+            }
         });
-        document.addEventListener('mouseup', () => { isPanning = false; });
+        function endPointer(e) {
+            if (!pointers.has(e.pointerId)) return;
+            pointers.delete(e.pointerId);
+            if (pointers.size < 2) pinch = null;
+            if (pointers.size === 1) beginPan([...pointers.values()][0]);
+            else if (pointers.size === 0) isPanning = false;
+            if (tap && tap.id === e.pointerId) {
+                const t = tap;
+                tap = null;
+                if (e.type === 'pointerup') tapComponent(t.x, t.y);
+            }
+        }
+        svgContainer.addEventListener('pointerup', endPointer);
+        svgContainer.addEventListener('pointercancel', endPointer);
 
         svgContainer.addEventListener('wheel', (e) => {
             e.preventDefault();
             const rect = svgContainer.getBoundingClientRect();
-            const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-            const delta = e.deltaY > 0 ? 0.9 : 1.1;
-            const ns = Math.max(0.1, Math.min(50, scale * delta));
-            panX = mx - (mx - panX) * (ns / scale);
-            panY = my - (my - panY) * (ns / scale);
-            scale = ns;
-            updateTransform();
-        });
+            zoomAbout(e.clientX - rect.left, e.clientY - rect.top, scale * (e.deltaY > 0 ? 0.9 : 1.1));
+        }, {passive: false});
 
         document.getElementById('zoom-in').addEventListener('click', () => {
             const r = svgContainer.getBoundingClientRect();
-            const cx = r.width/2, cy = r.height/2;
-            const ns = Math.min(50, scale * 1.25);
-            panX = cx - (cx - panX) * (ns / scale); panY = cy - (cy - panY) * (ns / scale);
-            scale = ns; updateTransform();
+            zoomAbout(r.width / 2, visibleHeight(r) / 2, scale * 1.25);
         });
         document.getElementById('zoom-out').addEventListener('click', () => {
             const r = svgContainer.getBoundingClientRect();
-            const cx = r.width/2, cy = r.height/2;
-            const ns = Math.max(0.1, scale * 0.8);
-            panX = cx - (cx - panX) * (ns / scale); panY = cy - (cy - panY) * (ns / scale);
-            scale = ns; updateTransform();
+            zoomAbout(r.width / 2, visibleHeight(r) / 2, scale * 0.8);
         });
         document.getElementById('zoom-fit').addEventListener('click', fitToView);
+
+        // On a phone the layer sheet's handle covers the bottom of the canvas; the board is
+        // fitted and zoomed in what is left above it.
+        const phoneLayout = window.matchMedia('(max-width: 768px)');
+        function sheetPeek() {
+            if (!phoneLayout.matches) return 0;
+            return parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sheet-peek')) || 0;
+        }
+        function visibleHeight(rect) { return rect.height - sheetPeek(); }
 
         function fitToView() {
             const svg = svgContent.querySelector('svg');
@@ -1688,10 +2064,11 @@
             if (!vb) return;
             const [,,w,h] = vb.split(' ').map(Number);
             const sw = w * PX_PER_MM, sh = h * PX_PER_MM;
-            const pad = 40;
-            scale = Math.min((rect.width - pad*2) / sw, (rect.height - pad*2) / sh, 10);
+            const pad = phoneLayout.matches ? 16 : 40;
+            const height = visibleHeight(rect);
+            scale = Math.min((rect.width - pad*2) / sw, (height - pad*2) / sh, 10);
             panX = (rect.width - sw * scale) / 2;
-            panY = (rect.height - sh * scale) / 2;
+            panY = (height - sh * scale) / 2;
             updateTransform();
         }
 
@@ -1726,6 +2103,47 @@
             const v = el.textContent.trim();
             if (!v || v.startsWith('$')) el.style.display = 'none';
             else el.textContent = v.startsWith('v') ? v : 'v' + v;
+        })();
+
+        // ===== Layer sheet (phone) =====
+        // The head of the sidebar is the sheet's handle: a tap toggles it, a swipe up opens it and
+        // a swipe down closes it. Controls inside the head (the select-all box, Top / Bot) keep
+        // their own clicks. Nothing here runs in the desktop layout, where the sidebar is a column.
+        (function initLayerSheet() {
+            const sidebar = document.getElementById('sidebar');
+            const head = document.getElementById('sidebar-head');
+            if (!sidebar || !head) return;
+            const SWIPE_PX = 36;
+            let drag = null, swiped = false;
+
+            function setOpen(open) {
+                sidebar.classList.toggle('open', open);
+                head.setAttribute('aria-expanded', String(open));
+            }
+            head.addEventListener('click', (e) => {
+                if (!phoneLayout.matches) return;
+                if (e.target.closest('button, input, select, a')) return;
+                if (swiped) { swiped = false; return; }   // the swipe already decided
+                setOpen(!sidebar.classList.contains('open'));
+            });
+            head.addEventListener('pointerdown', (e) => {
+                if (!phoneLayout.matches || e.target.closest('button, input, select, a')) return;
+                drag = {id: e.pointerId, y: e.clientY};
+                swiped = false;
+                head.setPointerCapture(e.pointerId);
+            });
+            head.addEventListener('pointermove', (e) => {
+                if (!drag || e.pointerId !== drag.id) return;
+                const dy = e.clientY - drag.y;
+                if (dy > SWIPE_PX) { setOpen(false); swiped = true; drag = null; }
+                else if (dy < -SWIPE_PX) { setOpen(true); swiped = true; drag = null; }
+            });
+            const stop = (e) => { if (drag && e.pointerId === drag.id) drag = null; };
+            head.addEventListener('pointerup', stop);
+            head.addEventListener('pointercancel', stop);
+            // Back on a wide screen the sidebar is a column again and "open" means nothing.
+            phoneLayout.addEventListener('change', () => { if (!phoneLayout.matches) setOpen(false); fitToView(); });
+            window.toggleLayerSheet = () => setOpen(!sidebar.classList.contains('open'));
         })();
 
         // ===== Sidebar resize =====
