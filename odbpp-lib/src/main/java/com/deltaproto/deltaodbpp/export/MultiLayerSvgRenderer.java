@@ -1,7 +1,8 @@
 package com.deltaproto.deltaodbpp.export;
 
-import com.deltaproto.deltaodbpp.export.render.SymbolRenderer;
-import com.deltaproto.deltaodbpp.export.render.SymbolResolver;
+import com.deltaproto.deltaodbpp.export.render.Extent;
+import com.deltaproto.deltaodbpp.export.render.FeaturePainter;
+import com.deltaproto.deltaodbpp.export.render.FeaturePainter.Palette;
 import com.deltaproto.deltaodbpp.model.*;
 import com.deltaproto.deltaodbpp.model.Component;
 import com.deltaproto.deltaodbpp.model.MirrorType;
@@ -32,6 +33,8 @@ public class MultiLayerSvgRenderer {
     private static final String COPPER_COLOR = "#cccccc";         // Silver/gray copper under soldermask
     private static final String COPPER_FINISH_COLOR = "#cc9933";  // Gold HASL/ENIG finish on exposed pads
     private static final double SOLDERMASK_OPACITY = 0.75;
+    private static final String BLIND_HOLE_COLOR = "#1a1a1a";    // Shadow in a hole that ends inside the board
+    private static final double BLIND_HOLE_OPACITY = 0.55;
 
     /** Which side of the board a realistic render / colour setter applies to. */
     public enum Side { TOP, BOTTOM }
@@ -161,11 +164,16 @@ public class MultiLayerSvgRenderer {
     }
 
     private final SvgRenderOptions baseOptions;
-    private SymbolResolver symbolResolver;
+    // The job being rendered: the source of user-defined symbols and of the stroke font.
+    // Null when a step is rendered without one; such a render draws standard symbols only.
+    private Job currentJob;
+    private FeaturePainter painter;
+    private double painterUnits;
     private double globalMinX = Double.MAX_VALUE;
     private double globalMinY = Double.MAX_VALUE;
-    private double globalMaxX = Double.MIN_VALUE;
-    private double globalMaxY = Double.MIN_VALUE;
+    private double globalMaxX = -Double.MAX_VALUE;
+    private double globalMaxY = -Double.MAX_VALUE;
+    private final Extent scratchExtent = new Extent();
 
     // When true (the per-layer preview path), renderFeature omits Text features so the
     // lightweight thumbnail carries only geometry — cheaper to draw and legible when small.
@@ -177,50 +185,31 @@ public class MultiLayerSvgRenderer {
 
     public MultiLayerSvgRenderer(SvgRenderOptions options) {
         this.baseOptions = options;
-        // SymbolResolver is created lazily when we know the unit system from Job/Step
     }
 
-    /**
-     * Creates a SymbolResolver with the appropriate unit system.
-     *
-     * @param useMillimeters true if ODB++ uses MM units (symbol dimensions in microns),
-     *                       false if using INCH units (symbol dimensions in mils)
-     */
-    private void initSymbolResolver(boolean useMillimeters) {
-        this.symbolResolver = new SymbolResolver(baseOptions.getDefaultPadSize(), useMillimeters);
+    /** Takes user-defined symbols and the stroke font from this job from now on. */
+    private void useJob(Job job) {
+        this.currentJob = job;
+        this.painter = null;
     }
 
-    /**
-     * Decide whether the archive is MM-native for symbol-resolution purposes.
-     *
-     * <p>Historically we relied on {@code MiscInfo.units}, but a non-trivial
-     * fraction of real archives (some Mentor Xpedition exports, for instance)
-     * declare {@code UNITS=} in neither misc/info nor stephdr, only
-     * inline as {@code U MM} in each features file. We therefore also look at
-     * the parsed features' {@code units} field as a fallback.
-     */
-    private static boolean detectUseMillimeters(Job job) {
-        if (job == null) return false;
-        if (job.getMiscInfo() != null && "MM".equalsIgnoreCase(job.getMiscInfo().getUnits())) {
-            return true;
+    /** A hairline is this fraction of the drawing's larger dimension. */
+    private static final double HAIRLINES_ACROSS = 2500;
+
+    /** The painter for the current job and output unit. */
+    private FeaturePainter painter() {
+        double units = baseOptions.toOutputUnit(1.0);
+        if (painter == null || units != painterUnits) {
+            painter = newPainter();
+            painterUnits = units;
         }
-        if (job.getSteps() != null) {
-            for (Step step : job.getSteps().values()) {
-                if (step.getStepHdr() != null && "MM".equalsIgnoreCase(step.getStepHdr().getUnits())) {
-                    return true;
-                }
-                if (step.getProfile() != null && "MM".equalsIgnoreCase(step.getProfile().getUnits())) {
-                    return true;
-                }
-                if (step.getLayersByName() != null) {
-                    for (Layer layer : step.getLayersByName().values()) {
-                        Features f = layer.getFeatures();
-                        if (f != null && "MM".equalsIgnoreCase(f.getUnits())) return true;
-                    }
-                }
-            }
-        }
-        return false;
+        return painter;
+    }
+
+    private FeaturePainter newPainter() {
+        return new FeaturePainter(baseOptions.toOutputUnit(1.0), baseOptions.getDefaultPadSize(),
+                currentJob != null ? currentJob.getSymbols() : null,
+                currentJob != null ? currentJob.getStandardFont() : null);
     }
 
     /**
@@ -306,7 +295,7 @@ public class MultiLayerSvgRenderer {
             return;
         }
 
-        initSymbolResolver(detectUseMillimeters(job));
+        useJob(job);
 
         // Get the first step (typically "pcb")
         Step step = job.getSteps().values().iterator().next();
@@ -322,12 +311,8 @@ public class MultiLayerSvgRenderer {
             return;
         }
 
-        // Initialize symbol resolver if not already done (e.g., when called directly without renderJob)
-        if (symbolResolver == null) {
-            initSymbolResolver(false); // Default to INCH/mils if no Job context
-        }
-
         // Calculate global bounds from layers
+        resetGlobalBounds();
         calculateGlobalBounds(step.getLayersByName().values());
 
         // Include profile bounds if available (profile often starts at 0,0)
@@ -418,7 +403,7 @@ public class MultiLayerSvgRenderer {
             writeEmptySvg(writer);
             return;
         }
-        initSymbolResolver(detectUseMillimeters(job));
+        useJob(job);
         Step step = stepName != null ? job.getSteps().get(stepName) : null;
         if (step == null) {
             step = job.getSteps().values().iterator().next();
@@ -437,10 +422,6 @@ public class MultiLayerSvgRenderer {
             writeEmptySvg(writer);
             return;
         }
-        if (symbolResolver == null) {
-            initSymbolResolver(false);
-        }
-
         Map.Entry<String, Layer> hit =
                 findLayerEntryCaseInsensitive(step.getLayersByName(), layerName.toLowerCase(Locale.ROOT));
         Layer layer = hit != null ? hit.getValue() : null;
@@ -570,7 +551,7 @@ public class MultiLayerSvgRenderer {
             return;
         }
 
-        initSymbolResolver(detectUseMillimeters(job));
+        useJob(job);
 
         Step step = job.getSteps().values().iterator().next();
         renderRealisticStep(step, job.getMatrix(), topSide, writer);
@@ -588,11 +569,6 @@ public class MultiLayerSvgRenderer {
         if (step == null || step.getLayersByName() == null) {
             writeEmptySvg(writer);
             return;
-        }
-
-        // Initialize symbol resolver if not already done
-        if (symbolResolver == null) {
-            initSymbolResolver(false);
         }
 
         // Extract board outline path from profile
@@ -702,55 +678,87 @@ public class MultiLayerSvgRenderer {
                 vbX, vbY, vbW, vbH,
                 topSide ? "top" : "bottom"));
 
+        // Each layer's artwork is written once, colourless, and placed with <use> wherever
+        // the stack needs it: copper is drawn twice (under the mask and as the finish in its
+        // openings) and the soldermask layer cuts two masks. Dark features take the fill and
+        // stroke of the use, clear ones its 'color'.
+        FeaturePainter art = newPainter().compact(true);
+        String side = topSide ? "top" : "bottom";
+        List<Artwork> copper = artworks(copperLayers, "cu", side, art, true);
+        List<Artwork> soldermask = artworks(soldermaskLayers, "sm", side, art, false);
+        List<Artwork> silkscreen = artworks(silkscreenLayers, "ss", side, art, false);
+        // Only a hole that goes all the way through shows what is behind the board; a blind
+        // one ends on an inner layer and is seen as a dimple in its pad.
+        List<LayerInfo> throughLayers = new ArrayList<>();
+        List<LayerInfo> blindLayers = new ArrayList<>();
+        for (LayerInfo info : drillLayers) {
+            (classifier.drillThrough(info.name) ? throughLayers : blindLayers).add(info);
+        }
+        List<Artwork> drills = artworks(throughLayers, "drill", side, art, false);
+        List<Artwork> blindDrills = artworks(blindLayers, "blind", side, art, false);
+
+        SideColors sideColors = colorsFor(topSide);
+        String smColor = sideColors.mask();
+        String ssColor = sideColors.silkscreen();
+        boolean hasSoldermask = !soldermask.isEmpty();
+        boolean hasDrills = !drills.isEmpty();
+        String smMaskId = topSide ? "sm-top-mask" : "sm-bottom-mask";
+        String cfMaskId = topSide ? "cf-top-mask" : "cf-bottom-mask";
+
         writer.write("<defs>\n");
 
         // Board outline clipPath — used to constrain every composition group to the board shape.
         writer.write("  <clipPath id=\"board-outline\" clipPathUnits=\"userSpaceOnUse\">\n");
-        writer.write(String.format("    <path d=\"%s\"/>\n", profilePath));
+        writer.write("    <path d=\"" + profilePath + "\"/>\n");
         writer.write("  </clipPath>\n");
 
-        boolean hasSoldermask = !soldermaskLayers.isEmpty();
-        String smMaskId = topSide ? "sm-top-mask" : "sm-bottom-mask";
-        String cfMaskId = topSide ? "cf-top-mask" : "cf-bottom-mask";
+        for (Artwork a : copper) writeArtwork(a, art, writer);
+        for (Artwork a : soldermask) writeArtwork(a, art, writer);
+        for (Artwork a : drills) writeArtwork(a, art, writer);
+        for (Artwork a : blindDrills) writeArtwork(a, art, writer);
+        if (ssColor != null) {
+            for (Artwork a : silkscreen) {
+                if (a.needsMask()) writeArtwork(a, art, writer);
+            }
+        }
+
+        // A layer with clear features, or one the matrix marks negative, is shown through a
+        // mask of its own: white where it leaves material.
+        for (Artwork a : copper) {
+            if (a.needsMask()) writeLayerMask(a, fullRect, writer);
+        }
+        if (ssColor != null) {
+            for (Artwork a : silkscreen) {
+                if (a.needsMask()) writeLayerMask(a, fullRect, writer);
+            }
+        }
 
         if (hasSoldermask) {
-            // sm-mask: board profile white (mask present = green visible),
-            // soldermask features black (mask absent = underlying copper/gold shows through)
-            writer.write(String.format("  <mask id=\"%s\" maskContentUnits=\"userSpaceOnUse\">\n", smMaskId));
-            writer.write(String.format("    <path d=\"%s\" fill=\"white\"/>\n", profilePath));
-            // stroke-width="0" matters: pad symbols emit fill-only elements, so a bare
-            // stroke here would inherit the SVG default width of 1 user unit — a 1 mm halo
-            // around every opening in a mm-scaled render, merging neighbouring pads into
-            // one big bare patch.
-            for (LayerInfo info : soldermaskLayers) {
-                writer.write("    <g fill=\"black\" stroke=\"black\" stroke-width=\"0\">\n");
-                renderLayerFeaturesRealistic(info.layer.getFeatures(), writer, "black", "white");
-                writer.write("    </g>\n");
+            // sm-mask: board profile white (mask present = green visible), soldermask
+            // features black (mask absent = underlying copper/gold shows through).
+            writer.write("  <mask id=\"" + smMaskId + "\" maskContentUnits=\"userSpaceOnUse\">\n");
+            writer.write("    <path d=\"" + profilePath + "\" fill=\"white\"/>\n");
+            for (Artwork a : soldermask) {
+                writer.write(useArtwork(a, "black", "white"));
             }
             writer.write("  </mask>\n");
 
-            // cf-mask: inverse — black background + soldermask features white,
-            // so gold finish is visible only through pad openings
-            writer.write(String.format("  <mask id=\"%s\" maskContentUnits=\"userSpaceOnUse\">\n", cfMaskId));
-            writer.write(String.format("    <rect %s fill=\"black\"/>\n", fullRect));
-            for (LayerInfo info : soldermaskLayers) {
-                writer.write("    <g fill=\"white\" stroke=\"white\" stroke-width=\"0\">\n");
-                renderLayerFeaturesRealistic(info.layer.getFeatures(), writer, "white", "black");
-                writer.write("    </g>\n");
+            // cf-mask: inverse — black background + soldermask features white, so the
+            // copper finish is visible only through pad openings.
+            writer.write("  <mask id=\"" + cfMaskId + "\" maskContentUnits=\"userSpaceOnUse\">\n");
+            writer.write("    <rect " + fullRect + " fill=\"black\"/>\n");
+            for (Artwork a : soldermask) {
+                writer.write(useArtwork(a, "white", "black"));
             }
             writer.write("  </mask>\n");
         }
 
-        // mech-mask: white background punched by drill holes (black). Only drills visible
-        // from the target side (through-holes, blind vias on this side) are included.
-        boolean hasDrills = !drillLayers.isEmpty();
+        // mech-mask: white background punched by the through holes and routed cut-outs (black).
         if (hasDrills) {
             writer.write("  <mask id=\"mech-mask\" maskContentUnits=\"userSpaceOnUse\">\n");
-            writer.write(String.format("    <rect %s fill=\"white\"/>\n", fullRect));
-            for (LayerInfo info : drillLayers) {
-                writer.write("    <g fill=\"black\" stroke=\"black\" stroke-width=\"0\">\n");
-                renderLayerFeaturesRealistic(info.layer.getFeatures(), writer, "black", "white");
-                writer.write("    </g>\n");
+            writer.write("    <rect " + fullRect + " fill=\"white\"/>\n");
+            for (Artwork a : drills) {
+                writer.write(useArtwork(a, "black", "white"));
             }
             writer.write("  </mask>\n");
         }
@@ -778,31 +786,31 @@ public class MultiLayerSvgRenderer {
         }
 
         // 1. FR4 substrate background
-        writer.write(String.format("    <g data-stack-layer=\"substrate\">\n"));
+        writer.write("    <g data-stack-layer=\"substrate\">\n");
         writer.write(String.format("      <rect %s fill=\"%s\"/>\n", fullRect, FR4_COLOR));
         writer.write("    </g>\n");
 
-        // 2. Copper layers (silver/gray) — visible through semi-transparent mask
+        // 2. Copper. Under a soldermask it is the bare metal seen through the mask; a side
+        // without any soldermask layer is exposed everywhere and carries the finish.
         writer.write("    <g data-stack-layer=\"copper\">\n");
-        for (LayerInfo info : copperLayers) {
-            writer.write(String.format(
-                    "      <g data-layer-name=\"%s\" fill=\"%s\" stroke=\"%s\" stroke-width=\"0\">\n",
-                    escapeAttr(info.name), COPPER_COLOR, COPPER_COLOR));
-            renderLayerFeaturesRealistic(info.layer.getFeatures(), writer, COPPER_COLOR, FR4_COLOR);
-            writer.write("      </g>\n");
-        }
+        writeStackLayers(copper, hasSoldermask ? COPPER_COLOR : COPPER_FINISH_COLOR, null, fullRect, writer);
         writer.write("    </g>\n");
 
         // 3. Copper finish (gold HASL/ENIG) — visible only where mask has openings (pad windows)
-        if (hasSoldermask && !copperLayers.isEmpty()) {
+        if (hasSoldermask && !copper.isEmpty()) {
             writer.write(String.format(
                     "    <g data-stack-layer=\"copper-finish\" mask=\"url(#%s)\">\n", cfMaskId));
-            for (LayerInfo info : copperLayers) {
-                writer.write(String.format(
-                        "      <g data-layer-name=\"%s\" fill=\"%s\" stroke=\"%s\" stroke-width=\"0\">\n",
-                        escapeAttr(info.name), COPPER_FINISH_COLOR, COPPER_FINISH_COLOR));
-                renderLayerFeaturesRealistic(info.layer.getFeatures(), writer, COPPER_FINISH_COLOR, FR4_COLOR);
-                writer.write("      </g>\n");
+            writeStackLayers(copper, COPPER_FINISH_COLOR, null, fullRect, writer);
+            writer.write("    </g>\n");
+        }
+
+        // Blind holes drilled from this side: the barrel is in shadow.
+        if (!blindDrills.isEmpty()) {
+            writer.write(String.format(Locale.US,
+                    "    <g data-stack-layer=\"blind-holes\" fill=\"%s\" stroke=\"%s\" stroke-width=\"0\" opacity=\"%.2f\">\n",
+                    BLIND_HOLE_COLOR, BLIND_HOLE_COLOR, BLIND_HOLE_OPACITY));
+            for (Artwork a : blindDrills) {
+                writer.write("      <use href=\"#" + a.id + "\"/>\n");
             }
             writer.write("    </g>\n");
         }
@@ -811,10 +819,8 @@ public class MultiLayerSvgRenderer {
         // inside so silk is only visible over the mask, never over exposed pads. The mask and
         // legend colours come from the side's SideColors; either may be null to leave that
         // finish off the board (SoldermaskColor.NONE / SilkscreenColor.NONE).
-        SideColors sideColors = colorsFor(topSide);
-        String smColor = sideColors.mask();
-        String ssColor = sideColors.silkscreen();
-        if (hasSoldermask && (smColor != null || ssColor != null)) {
+        boolean hasLegend = ssColor != null && !silkscreen.isEmpty();
+        if (hasSoldermask && (smColor != null || hasLegend)) {
             writer.write(String.format(
                     "    <g data-stack-layer=\"soldermask\" mask=\"url(#%s)\">\n", smMaskId));
 
@@ -829,24 +835,95 @@ public class MultiLayerSvgRenderer {
             // Silkscreen inside the soldermask. A side ordered without a legend prints none,
             // whatever silkscreen files it ships. The pcb-silkscreen class marks the group so
             // a viewer can recolor it when the soldermask color changes.
-            if (ssColor != null) {
-                for (LayerInfo info : silkscreenLayers) {
-                    writer.write(String.format(
-                            "      <g class=\"pcb-silkscreen\" data-stack-layer=\"silkscreen\" " +
-                                    "data-layer-name=\"%s\" fill=\"%s\" stroke=\"%s\" stroke-width=\"0\">\n",
-                            escapeAttr(info.name), ssColor, ssColor));
-                    renderLayerFeaturesRealistic(info.layer.getFeatures(), writer, ssColor,
-                            smColor != null ? smColor : FR4_COLOR);
-                    writer.write("      </g>\n");
-                }
+            if (hasLegend) {
+                writeStackLayers(silkscreen, ssColor, art, fullRect, writer);
             }
 
             writer.write("    </g>\n");
+        } else if (!hasSoldermask && hasLegend) {
+            // No soldermask layer on this side: the legend is printed straight onto the board.
+            writeStackLayers(silkscreen, ssColor, art, fullRect, writer);
         }
 
         writer.write("  </g>\n"); // close board group
         writer.write("</g>\n"); // close viewport
         writer.write("</svg>\n");
+    }
+
+    /** One layer's drawing in the realistic view, defined once and referenced by id. */
+    private static final class Artwork {
+        LayerInfo info;
+        String id;
+        /** The layer draws clear features, which have to erase within the layer only. */
+        boolean clear;
+        /** The matrix marks the layer negative: its features are where material is absent. */
+        boolean negative;
+
+        boolean needsMask() {
+            return clear || negative;
+        }
+    }
+
+    private List<Artwork> artworks(List<LayerInfo> layers, String kind, String side,
+                                   FeaturePainter art, boolean honourMatrixPolarity) {
+        List<Artwork> result = new ArrayList<>();
+        for (LayerInfo info : layers) {
+            Artwork a = new Artwork();
+            a.info = info;
+            a.id = "art-" + side + "-" + kind + "-" + result.size();
+            a.clear = art.hasClear(info.layer.getFeatures());
+            a.negative = honourMatrixPolarity && info.matrixLayer != null
+                    && "NEGATIVE".equalsIgnoreCase(info.matrixLayer.getPolarity());
+            result.add(a);
+        }
+        return result;
+    }
+
+    private void writeArtwork(Artwork a, FeaturePainter art, Writer writer) throws IOException {
+        writer.write("  <g id=\"" + a.id + "\">\n");
+        art.paint(a.info.layer.getFeatures(), writer, Palette.INHERIT);
+        writer.write("  </g>\n");
+    }
+
+    /** A reference to a layer's artwork, dark features in one colour and clear ones in another. */
+    private static String useArtwork(Artwork a, String dark, String clear) {
+        return "    <use href=\"#" + a.id + "\" fill=\"" + dark + "\" stroke=\"" + dark
+                + "\" stroke-width=\"0\" color=\"" + clear + "\"/>\n";
+    }
+
+    private void writeLayerMask(Artwork a, String fullRect, Writer writer) throws IOException {
+        writer.write("  <mask id=\"" + a.id + "-mask\" maskContentUnits=\"userSpaceOnUse\">\n");
+        if (a.negative) {
+            writer.write("    <rect " + fullRect + " fill=\"white\"/>\n");
+            writer.write(useArtwork(a, "black", "white"));
+        } else {
+            writer.write(useArtwork(a, "white", "black"));
+        }
+        writer.write("  </mask>\n");
+    }
+
+    /**
+     * Writes one group per layer in the given colour. The copper layers reference their
+     * artwork; silkscreen (inline != null) carries its artwork in the group itself, tagged so
+     * a viewer can recolour the legend. A layer that needs a mask is a rectangle seen
+     * through it.
+     */
+    private void writeStackLayers(List<Artwork> layers, String color, FeaturePainter inline,
+                                  String fullRect, Writer writer) throws IOException {
+        for (Artwork a : layers) {
+            String tag = inline != null ? "class=\"pcb-silkscreen\" data-stack-layer=\"silkscreen\" " : "";
+            writer.write(String.format(
+                    "      <g %sdata-layer-name=\"%s\" fill=\"%s\" stroke=\"%s\" stroke-width=\"0\">\n",
+                    tag, escapeAttr(a.info.name), color, color));
+            if (a.needsMask()) {
+                writer.write("        <rect " + fullRect + " mask=\"url(#" + a.id + "-mask)\"/>\n");
+            } else if (inline != null) {
+                inline.paint(a.info.layer.getFeatures(), writer, Palette.INHERIT);
+            } else {
+                writer.write("        <use href=\"#" + a.id + "\"/>\n");
+            }
+            writer.write("      </g>\n");
+        }
     }
 
     /**
@@ -928,7 +1005,7 @@ public class MultiLayerSvgRenderer {
             writeEmptySvg(writer);
             return;
         }
-        initSymbolResolver(detectUseMillimeters(job));
+        useJob(job);
         Step step = job.getSteps().values().iterator().next();
         renderComponentsStep(step, job.getMatrix(), topSide, writer);
     }
@@ -946,8 +1023,6 @@ public class MultiLayerSvgRenderer {
             writeEmptySvg(writer);
             return;
         }
-        if (symbolResolver == null) initSymbolResolver(false);
-
         String profilePath = extractProfilePath(step.getProfile());
         if (profilePath == null || profilePath.isEmpty()) {
             writeEmptySvg(writer);
@@ -1153,6 +1228,13 @@ public class MultiLayerSvgRenderer {
                     int largeArc = swept > Math.PI ? 1 : 0;
                     // The viewport flips Y, so a clockwise model arc is drawn with sweep 0.
                     int sweep = part.isClockwise() ? 0 : 1;
+                    if (px == ex && py == ey && r > 0) {
+                        // Equal end points are a full circle: go by way of the opposite point.
+                        d.append(String.format(Locale.US, " A %.4f %.4f 0 1 %d %.4f %.4f",
+                                baseOptions.toOutputUnit(r), baseOptions.toOutputUnit(r), sweep,
+                                baseOptions.toOutputUnit(2 * cx - px), baseOptions.toOutputUnit(2 * cy - py)));
+                        largeArc = 1;
+                    }
                     d.append(String.format(Locale.US, " A %.4f %.4f 0 %d %d %.4f %.4f",
                             baseOptions.toOutputUnit(r), baseOptions.toOutputUnit(r), largeArc, sweep,
                             baseOptions.toOutputUnit(ex), baseOptions.toOutputUnit(ey)));
@@ -1604,77 +1686,17 @@ public class MultiLayerSvgRenderer {
     }
 
     /**
-     * Renders all features from a layer with specified colors for realistic view.
-     * Temporarily overrides the background color for correct polarity handling.
-     */
-    private void renderLayerFeaturesRealistic(Features features, Writer writer,
-            String color, String bgColor) throws IOException {
-        if (features == null || features.getFeatures().isEmpty()) return;
-        String savedBg = baseOptions.getBackgroundColor();
-        baseOptions.withBackground(bgColor);
-        try {
-            for (Feature feature : features.getFeatures()) {
-                renderFeature(feature, features, writer, color);
-            }
-        } finally {
-            baseOptions.withBackground(savedBg);
-        }
-    }
-
-    /**
-     * Extract a filled SVG path from the board profile Features.
-     * Used as clipPath for realistic rendering.
+     * The board outline as filled path data, in output units: the profile's surfaces, or
+     * failing those the figure its lines and arcs trace. Used to clip the realistic and
+     * components views to the board.
      */
     private String extractProfilePath(Features profile) {
         if (profile == null || profile.getFeatures().isEmpty()) return null;
-
-        StringBuilder path = new StringBuilder();
-        for (Feature feature : profile.getFeatures()) {
-            if (feature instanceof Surface surface) {
-                for (ContourPolygon polygon : surface.getPolygons()) {
-                    double startX = baseOptions.toOutputUnit(polygon.getXStart());
-                    double startY = baseOptions.toOutputUnit(polygon.getYStart());
-                    path.append(String.format(Locale.US, "M %.4f %.4f", startX, startY));
-                    for (ContourPolygon.PolygonPart part : polygon.getPolygonParts()) {
-                        double endX = baseOptions.toOutputUnit(part.getEndX());
-                        double endY = baseOptions.toOutputUnit(part.getEndY());
-                        if (part.getType() == ContourPolygon.PolygonPart.Type.SEGMENT) {
-                            path.append(String.format(Locale.US, " L %.4f %.4f", endX, endY));
-                        } else if (part.getType() == ContourPolygon.PolygonPart.Type.ARC) {
-                            double radius = Math.sqrt(
-                                    Math.pow(part.getEndX() - part.getXCenter(), 2) +
-                                    Math.pow(part.getEndY() - part.getYCenter(), 2));
-                            double r = baseOptions.toOutputUnit(radius);
-                            int sweep = part.isClockwise() ? 0 : 1;
-                            path.append(String.format(Locale.US, " A %.4f %.4f 0 0 %d %.4f %.4f",
-                                    r, r, sweep, endX, endY));
-                        }
-                    }
-                    path.append(" Z ");
-                }
-            } else if (feature instanceof Line line) {
-                double x1 = baseOptions.toOutputUnit(line.getXs());
-                double y1 = baseOptions.toOutputUnit(line.getYs());
-                double x2 = baseOptions.toOutputUnit(line.getXe());
-                double y2 = baseOptions.toOutputUnit(line.getYe());
-                path.append(String.format(Locale.US, "M %.4f %.4f L %.4f %.4f ", x1, y1, x2, y2));
-            } else if (feature instanceof Arc arc) {
-                double radius = Math.sqrt(
-                        Math.pow(arc.getXs() - arc.getXc(), 2) +
-                        Math.pow(arc.getYs() - arc.getYc(), 2));
-                double r = baseOptions.toOutputUnit(radius);
-                double xs = baseOptions.toOutputUnit(arc.getXs());
-                double ys = baseOptions.toOutputUnit(arc.getYs());
-                double xe = baseOptions.toOutputUnit(arc.getXe());
-                double ye = baseOptions.toOutputUnit(arc.getYe());
-                int sweepFlag = "Y".equalsIgnoreCase(arc.getCw()) ? 0 : 1;
-                path.append(String.format(Locale.US, "M %.4f %.4f A %.4f %.4f 0 0 %d %.4f %.4f ",
-                        xs, ys, r, r, sweepFlag, xe, ye));
-            }
+        String path = painter().surfacePathData(profile);
+        if (path.isEmpty()) {
+            path = painter().outlinePathData(profile);
         }
-
-        String result = path.toString().trim();
-        return result.isEmpty() ? null : result;
+        return path.isEmpty() ? null : path;
     }
 
     /**
@@ -1728,8 +1750,12 @@ public class MultiLayerSvgRenderer {
         for (Layer layer : layers) {
             if (layer.getFeatures() == null) continue;
 
-            for (Feature feature : layer.getFeatures().getFeatures()) {
-                updateBounds(feature);
+            // What the layer draws: its pads and strokes whole, not only their centres.
+            scratchExtent.reset();
+            painter().addInk(layer.getFeatures(), scratchExtent);
+            if (!scratchExtent.isEmpty()) {
+                updatePoint(scratchExtent.minX(), scratchExtent.minY());
+                updatePoint(scratchExtent.maxX(), scratchExtent.maxY());
             }
         }
 
@@ -1750,48 +1776,17 @@ public class MultiLayerSvgRenderer {
         if (profile == null || profile.getFeatures().isEmpty()) {
             return;
         }
-
         for (Feature feature : profile.getFeatures()) {
-            if (feature instanceof Surface surface) {
-                for (ContourPolygon polygon : surface.getPolygons()) {
-                    updatePoint(polygon.getXStart(), polygon.getYStart());
-                    for (ContourPolygon.PolygonPart part : polygon.getPolygonParts()) {
-                        updatePoint(part.getEndX(), part.getEndY());
-                        if (part.getType() == ContourPolygon.PolygonPart.Type.ARC) {
-                            updatePoint(part.getXCenter(), part.getYCenter());
-                        }
-                    }
-                }
-            } else if (feature instanceof Line line) {
-                updatePoint(line.getXs(), line.getYs());
-                updatePoint(line.getXe(), line.getYe());
-            } else if (feature instanceof Arc arc) {
-                updatePoint(arc.getXs(), arc.getYs());
-                updatePoint(arc.getXe(), arc.getYe());
-                updatePoint(arc.getXc(), arc.getYc());
-            }
+            updateBounds(feature);
         }
     }
 
     private void updateBounds(Feature feature) {
-        if (feature instanceof Pad pad) {
-            updatePoint(pad.getX(), pad.getY());
-        } else if (feature instanceof Line line) {
-            updatePoint(line.getXs(), line.getYs());
-            updatePoint(line.getXe(), line.getYe());
-        } else if (feature instanceof Arc arc) {
-            updatePoint(arc.getXs(), arc.getYs());
-            updatePoint(arc.getXe(), arc.getYe());
-            updatePoint(arc.getXc(), arc.getYc());
-        } else if (feature instanceof Surface surface) {
-            for (ContourPolygon polygon : surface.getPolygons()) {
-                updatePoint(polygon.getXStart(), polygon.getYStart());
-                for (ContourPolygon.PolygonPart part : polygon.getPolygonParts()) {
-                    updatePoint(part.getEndX(), part.getEndY());
-                }
-            }
-        } else if (feature instanceof Text text) {
-            updatePoint(text.getX(), text.getY());
+        scratchExtent.reset();
+        scratchExtent.add(feature);
+        if (!scratchExtent.isEmpty()) {
+            updatePoint(scratchExtent.minX(), scratchExtent.minY());
+            updatePoint(scratchExtent.maxX(), scratchExtent.maxY());
         }
     }
 
@@ -1984,55 +1979,10 @@ public class MultiLayerSvgRenderer {
 
         // Profile uses vector-effect="non-scaling-stroke" so it always appears the same width regardless of zoom
         // Stroke width is in pixels (2px like reference)
-        String profileStyle = "fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"2px\" vector-effect=\"non-scaling-stroke\" class=\"profile\"";
-
-        for (Feature feature : profile.getFeatures()) {
-            if (feature instanceof Surface surface) {
-                for (ContourPolygon polygon : surface.getPolygons()) {
-                    StringBuilder pathData = new StringBuilder();
-                    double startX = baseOptions.toOutputUnit(polygon.getXStart());
-                    double startY = baseOptions.toOutputUnit(polygon.getYStart());
-                    pathData.append(String.format(Locale.US, "M %.4f %.4f", startX, startY));
-
-                    for (ContourPolygon.PolygonPart part : polygon.getPolygonParts()) {
-                        double endX = baseOptions.toOutputUnit(part.getEndX());
-                        double endY = baseOptions.toOutputUnit(part.getEndY());
-
-                        if (part.getType() == ContourPolygon.PolygonPart.Type.SEGMENT) {
-                            pathData.append(String.format(Locale.US, " L %.4f %.4f", endX, endY));
-                        } else if (part.getType() == ContourPolygon.PolygonPart.Type.ARC) {
-                            double radius = Math.sqrt(
-                                    Math.pow(part.getEndX() - part.getXCenter(), 2) +
-                                    Math.pow(part.getEndY() - part.getYCenter(), 2));
-                            double r = baseOptions.toOutputUnit(radius);
-                            int sweepFlag = part.isClockwise() ? 0 : 1;
-                            pathData.append(String.format(Locale.US, " A %.4f %.4f 0 0 %d %.4f %.4f",
-                                    r, r, sweepFlag, endX, endY));
-                        }
-                    }
-                    pathData.append(" Z");
-
-                    writer.write(String.format(Locale.US, "      <path d=\"%s\" %s/>\n",
-                            pathData, profileStyle));
-                }
-            } else if (feature instanceof Line line) {
-                double x1 = baseOptions.toOutputUnit(line.getXs());
-                double y1 = baseOptions.toOutputUnit(line.getYs());
-                double x2 = baseOptions.toOutputUnit(line.getXe());
-                double y2 = baseOptions.toOutputUnit(line.getYe());
-                writer.write(String.format(Locale.US, "      <path d=\"M %.4f %.4f L %.4f %.4f\" %s/>\n",
-                        x1, y1, x2, y2, profileStyle));
-            } else if (feature instanceof Arc arc) {
-                double radius = Math.sqrt(Math.pow(arc.getXs() - arc.getXc(), 2) + Math.pow(arc.getYs() - arc.getYc(), 2));
-                double r = baseOptions.toOutputUnit(radius);
-                double xs = baseOptions.toOutputUnit(arc.getXs());
-                double ys = baseOptions.toOutputUnit(arc.getYs());
-                double xe = baseOptions.toOutputUnit(arc.getXe());
-                double ye = baseOptions.toOutputUnit(arc.getYe());
-                int sweepFlag = "Y".equalsIgnoreCase(arc.getCw()) ? 0 : 1;
-                writer.write(String.format(Locale.US, "      <path d=\"M %.4f %.4f A %.4f %.4f 0 0 %d %.4f %.4f\" %s/>\n",
-                        xs, ys, r, r, sweepFlag, xe, ye, profileStyle));
-            }
+        String outline = painter().outlinePathData(profile);
+        if (!outline.isEmpty()) {
+            writer.write("      <path d=\"" + outline + "\" fill=\"none\" stroke=\"#FFFFFF\" "
+                    + "stroke-width=\"2px\" vector-effect=\"non-scaling-stroke\" class=\"profile\"/>\n");
         }
 
         writer.write("    </g>\n");
@@ -2043,125 +1993,43 @@ public class MultiLayerSvgRenderer {
 
         writer.write(String.format(Locale.US, "    <g id=\"layer-%s\" class=\"layer layer-%s\" " +
                         "data-layer-name=\"%s\" data-layer-type=\"%s\">\n",
-                safeId, safeId, info.name, info.type));
+                safeId, safeId, escapeAttr(info.name), info.type));
 
         Features features = info.layer.getFeatures();
 
         // Only render features if they exist
         if (features != null && !features.getFeatures().isEmpty()) {
-            StringWriter layerContent = new StringWriter();
-            // Render features directly (without full SVG wrapper)
-            for (Feature feature : features.getFeatures()) {
-                renderFeature(feature, features, layerContent, info.color);
+            // Zero-width strokes are drawn as hairlines that stay visible at this size.
+            FeaturePainter painter = painter().skipText(previewMode).hairlineMm(
+                    Math.max(globalMaxX - globalMinX, globalMaxY - globalMinY) / HAIRLINES_ACROSS);
+            if (painter.hasClear(features)) {
+                // Negative features erase what the layer has drawn so far and nothing else:
+                // paint the layer as a mask and show the layer colour through it.
+                String maskId = "layer-mask-" + safeId;
+                String frame = frameRect();
+                writer.write("      <mask id=\"" + maskId + "\" maskUnits=\"userSpaceOnUse\" "
+                        + "maskContentUnits=\"userSpaceOnUse\" " + frame + ">\n");
+                painter.paint(features, writer, Palette.of("#ffffff", "#000000"));
+                writer.write("      </mask>\n");
+                writer.write("      <rect " + frame + " fill=\"" + info.color + "\" mask=\"url(#"
+                        + maskId + ")\"/>\n");
+            } else {
+                painter.paint(features, writer, Palette.of(info.color, info.color));
             }
-            writer.write(layerContent.toString());
         }
 
         writer.write("    </g>\n");
     }
 
-    private void renderFeature(Feature feature, Features features, Writer writer, String color) throws IOException {
-        if (feature instanceof Pad pad) {
-            // Resolve symbol from symbol table for proper dimensions
-            SymbolRenderer renderer = symbolResolver.resolve(pad.getSymbolNumber(), features);
-
-            // Apply resize factor if present
-            double scale = pad.getResizeFactor() != null ? pad.getResizeFactor() : 1.0;
-
-            // Convert coordinates to output units
-            double x = baseOptions.toOutputUnit(pad.getX());
-            double y = baseOptions.toOutputUnit(pad.getY());
-
-            // SymbolResolver returns dimensions in mm. Apply the same unit conversion
-            // as positions so they end up in the configured output unit together.
-            double symbolScale = scale * baseOptions.toOutputUnit(1.0);
-
-            // Get rotation and mirror from orientation
-            double rotation = getRotationFromOrientationType(pad.getOrientationType(), pad.getCustomRotation());
-            boolean mirror = isOrientationMirrored(pad.getOrientationType());
-
-            // Render using the symbol renderer
-            String svg = renderer.render(x, y, rotation, mirror, symbolScale, color);
-            writer.write("      " + svg + "\n");
-        } else if (feature instanceof Line line) {
-            // Resolve symbol from symbol table for line width
-            SymbolRenderer renderer = symbolResolver.resolve(line.getSymbolNumber(), features);
-            // Symbol width is mm; convert to output unit.
-            double strokeWidth = baseOptions.toOutputUnit(renderer.getWidth());
-
-            double x1 = baseOptions.toOutputUnit(line.getXs());
-            double y1 = baseOptions.toOutputUnit(line.getYs());
-            double x2 = baseOptions.toOutputUnit(line.getXe());
-            double y2 = baseOptions.toOutputUnit(line.getYe());
-            // Use path format like reference SVG: <path d="M x1 y1 L x2 y2" .../>
-            writer.write(String.format(Locale.US, "      <path d=\"M %.4f %.4f L %.4f %.4f\" " +
-                            "stroke=\"%s\" stroke-width=\"%.4f\" stroke-linecap=\"round\" fill=\"none\"/>\n",
-                    x1, y1, x2, y2, color, strokeWidth));
-        } else if (feature instanceof Arc arc) {
-            // Resolve symbol from symbol table for stroke width
-            SymbolRenderer renderer = symbolResolver.resolve(arc.getSymbolNumber(), features);
-            // Symbol width is mm; convert to output unit.
-            double strokeWidth = baseOptions.toOutputUnit(renderer.getWidth());
-
-            double radius = Math.sqrt(Math.pow(arc.getXs() - arc.getXc(), 2) + Math.pow(arc.getYs() - arc.getYc(), 2));
-            double xs = baseOptions.toOutputUnit(arc.getXs());
-            double ys = baseOptions.toOutputUnit(arc.getYs());
-            double xe = baseOptions.toOutputUnit(arc.getXe());
-            double ye = baseOptions.toOutputUnit(arc.getYe());
-            double r = baseOptions.toOutputUnit(radius);
-            int sweepFlag = "Y".equalsIgnoreCase(arc.getCw()) ? 0 : 1;
-            writer.write(String.format(Locale.US, "      <path d=\"M %.4f %.4f A %.4f %.4f 0 0 %d %.4f %.4f\" " +
-                            "stroke=\"%s\" stroke-width=\"%.4f\" fill=\"none\" stroke-linecap=\"round\"/>\n",
-                    xs, ys, r, r, sweepFlag, xe, ye, color, strokeWidth));
-        } else if (feature instanceof Surface surface) {
-            // Combine all polygons (islands and holes) into a single path with evenodd fill-rule
-            // This ensures holes properly cut out from the islands
-            StringBuilder combinedPath = new StringBuilder();
-
-            for (ContourPolygon polygon : surface.getPolygons()) {
-                double startX = baseOptions.toOutputUnit(polygon.getXStart());
-                double startY = baseOptions.toOutputUnit(polygon.getYStart());
-                combinedPath.append(String.format(Locale.US, "M %.4f %.4f", startX, startY));
-
-                for (ContourPolygon.PolygonPart part : polygon.getPolygonParts()) {
-                    double endX = baseOptions.toOutputUnit(part.getEndX());
-                    double endY = baseOptions.toOutputUnit(part.getEndY());
-
-                    if (part.getType() == ContourPolygon.PolygonPart.Type.SEGMENT) {
-                        combinedPath.append(String.format(Locale.US, " L %.4f %.4f", endX, endY));
-                    } else if (part.getType() == ContourPolygon.PolygonPart.Type.ARC) {
-                        double r = Math.sqrt(
-                                Math.pow(part.getEndX() - part.getXCenter(), 2) +
-                                Math.pow(part.getEndY() - part.getYCenter(), 2));
-                        double rConverted = baseOptions.toOutputUnit(r);
-                        int sweep = part.isClockwise() ? 0 : 1;
-                        combinedPath.append(String.format(Locale.US, " A %.4f %.4f 0 0 %d %.4f %.4f",
-                                rConverted, rConverted, sweep, endX, endY));
-                    }
-                }
-                combinedPath.append(" Z ");
-            }
-
-            String fillColor = surface.getPolarity() == Polarity.NEGATIVE ?
-                    (baseOptions.getBackgroundColor() != null ? baseOptions.getBackgroundColor() : "#FFFFFF") :
-                    color;
-            writer.write(String.format(Locale.US, "      <path d=\"%s\" fill=\"%s\" fill-rule=\"evenodd\" stroke=\"none\"/>\n",
-                    combinedPath.toString().trim(), fillColor));
-        } else if (feature instanceof Text text) {
-            // Preview thumbnails skip text: reduced detail, and small text is illegible anyway.
-            if (!previewMode && text.getText() != null && !text.getText().isEmpty()) {
-                double fontSize = baseOptions.toOutputUnit(text.getYsize() > 0 ? text.getYsize() : baseOptions.getDefaultFontSize());
-                double x = baseOptions.toOutputUnit(text.getX());
-                double y = baseOptions.toOutputUnit(text.getY());
-                String escaped = text.getText()
-                        .replace("&", "&amp;")
-                        .replace("<", "&lt;")
-                        .replace(">", "&gt;");
-                writer.write(String.format(Locale.US, "      <text x=\"%.4f\" y=\"%.4f\" " +
-                                "font-size=\"%.4f\" fill=\"%s\" transform=\"scale(1,-1) translate(0,%.4f)\">%s</text>\n",
-                        x, -y, fontSize, color, 0.0, escaped));
-            }
-        }
+    /** The drawing frame — bounds plus padding — as rect attributes in output units. */
+    private String frameRect() {
+        double minX = baseOptions.toOutputUnit(globalMinX);
+        double minY = baseOptions.toOutputUnit(globalMinY);
+        double maxX = baseOptions.toOutputUnit(globalMaxX);
+        double maxY = baseOptions.toOutputUnit(globalMaxY);
+        double padding = baseOptions.toOutputUnit(baseOptions.getPadding());
+        return String.format(Locale.US, "x=\"%.4f\" y=\"%.4f\" width=\"%.4f\" height=\"%.4f\"",
+                minX - padding, minY - padding, maxX - minX + 2 * padding, maxY - minY + 2 * padding);
     }
 
     /**
@@ -2245,31 +2113,6 @@ public class MultiLayerSvgRenderer {
 
     private void writeSvgFooter(Writer writer) throws IOException {
         writer.write("</svg>\n");
-    }
-
-    /**
-     * Get rotation angle from orientation type.
-     * Legacy values 0-7: 0=0°, 1=90°, 2=180°, 3=270°, 4=0°+mirror, 5=90°+mirror, 6=180°+mirror, 7=270°+mirror
-     * New format: 8=any angle no mirror, 9=any angle with mirror
-     */
-    private double getRotationFromOrientationType(int orientationType, Double customRotation) {
-        if (orientationType == 8 || orientationType == 9) {
-            return customRotation != null ? customRotation : 0;
-        }
-        return switch (orientationType % 4) {
-            case 0 -> 0;
-            case 1 -> 90;
-            case 2 -> 180;
-            case 3 -> 270;
-            default -> 0;
-        };
-    }
-
-    /**
-     * Check if orientation type includes mirroring.
-     */
-    private boolean isOrientationMirrored(int orientationType) {
-        return orientationType >= 4 && orientationType <= 7 || orientationType == 9;
     }
 
     private static class LayerInfo {

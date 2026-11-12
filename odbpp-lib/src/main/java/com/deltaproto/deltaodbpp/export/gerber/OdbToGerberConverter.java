@@ -328,7 +328,7 @@ public class OdbToGerberConverter {
         Features out = new Features();
         out.setUnits(all.getUnits());
         out.setSymbolTable(all.getSymbolTable());
-        out.setSymbolMirrorFlags(all.getSymbolMirrorFlags());
+        out.setSymbolMetricFlags(all.getSymbolMetricFlags());
         out.setAttributeNames(all.getAttributeNames());
         out.setAttributeTextStrings(all.getAttributeTextStrings());
         out.setFeatures(features);
@@ -373,8 +373,8 @@ public class OdbToGerberConverter {
             }
         }
         if (tools != null && tools.getTools() != null) {
-            double unitToMm = features.isMillimeters() ? 0.001 : 0.0254;
-            OdbSymbolShape shape = OdbSymbolShape.parse(features.getSymbolName(symbolNumber), unitToMm);
+            OdbSymbolShape shape = OdbSymbolShape.parse(features.getSymbolName(symbolNumber),
+                    features.symbolUnitToMm(symbolNumber));
             if (shape != null) {
                 for (Tool tool : tools.getTools()) {
                     if (tool.getFinishSize() > 0 && Math.abs(tool.getFinishSize() - shape.strokeDiameter()) <= 0.005) {
@@ -441,7 +441,6 @@ public class OdbToGerberConverter {
                 continue;
             }
             Features features = layer.getFeatures();
-            double unitToMm = features.isMillimeters() ? 0.001 : 0.0254;
             Double width = null;
             for (Feature feature : features.getFeatures()) {
                 int symbolNumber;
@@ -452,7 +451,8 @@ public class OdbToGerberConverter {
                 } else {
                     continue;
                 }
-                OdbSymbolShape shape = OdbSymbolShape.parse(features.getSymbolName(symbolNumber), unitToMm);
+                OdbSymbolShape shape = OdbSymbolShape.parse(features.getSymbolName(symbolNumber),
+                        features.symbolUnitToMm(symbolNumber));
                 if (shape == null || shape.kind != OdbSymbolShape.Kind.ROUND || shape.width <= 0) {
                     width = null;
                     break;

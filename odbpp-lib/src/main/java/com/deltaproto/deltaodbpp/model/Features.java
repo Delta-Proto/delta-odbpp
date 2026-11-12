@@ -28,10 +28,22 @@ public class Features {
     private Map<Integer, String> symbolTable = new HashMap<>();
 
     /**
-     * Symbol mirror flags mapping symbol number to mirror flag.
-     * Parsed from $<num> <name> [M|I] lines.
-     * M = mirrored, I = not mirrored (default if not specified)
+     * Symbols whose symbol-table line carries an explicit unit flag:
+     * {@code $<num> <name> I} (imperial, dimensions in mils) or {@code $<num> <name> M}
+     * (metric, dimensions in microns). Maps symbol number to {@code true} for metric,
+     * {@code false} for imperial. A symbol without a flag is in the file's own
+     * {@link #units}.
      */
+    private Map<Integer, Boolean> symbolMetricFlags = new HashMap<>();
+
+    /**
+     * Legacy field: the {@code M} flag of a symbol-table line used to be read as
+     * "mirrored". It is a unit flag — see {@link #symbolMetricFlags}. Kept so existing
+     * callers compile; nothing in the library reads it.
+     *
+     * @deprecated use {@link #isSymbolMillimeters(int)}
+     */
+    @Deprecated
     private Map<Integer, Boolean> symbolMirrorFlags = new HashMap<>();
 
     /**
@@ -58,12 +70,32 @@ public class Features {
     }
 
     /**
-     * Check if a symbol is mirrored.
-     * @param symbolNumber the symbol reference number
-     * @return true if mirrored (M flag), false if not mirrored or not specified
+     * The symbol-table flag was never a mirror flag; this always reported the unit flag.
+     *
+     * @deprecated the {@code I|M} flag states the symbol's unit; use
+     *             {@link #isSymbolMillimeters(int)}. Always returns {@code false}.
      */
+    @Deprecated
     public boolean isSymbolMirrored(int symbolNumber) {
-        return symbolMirrorFlags.getOrDefault(symbolNumber, false);
+        return false;
+    }
+
+    /**
+     * Whether a symbol's name states its dimensions in microns (metric) rather than
+     * mils (imperial): the symbol's own {@code I|M} flag when it has one, otherwise the
+     * unit of the features file.
+     */
+    public boolean isSymbolMillimeters(int symbolNumber) {
+        Boolean flag = symbolMetricFlags.get(symbolNumber);
+        return flag != null ? flag : isMillimeters();
+    }
+
+    /**
+     * Factor that converts a dimension in a symbol's name to millimetres:
+     * 0.001 for a metric symbol (microns), 0.0254 for an imperial one (mils).
+     */
+    public double symbolUnitToMm(int symbolNumber) {
+        return isSymbolMillimeters(symbolNumber) ? 0.001 : 0.0254;
     }
 
     /**

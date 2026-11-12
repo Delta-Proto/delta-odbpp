@@ -37,7 +37,8 @@ public final class OdbSymbolShape {
     private static final Pattern CHAMFERED_RECT =
             Pattern.compile("rect" + NUM + "x" + NUM + "xc" + NUM + "(?:x([1-4]+))?");
     private static final Pattern OVAL = Pattern.compile("oval" + NUM + "x" + NUM);
-    private static final Pattern DONUT = Pattern.compile("donut_r" + NUM + "x" + NUM);
+    /** The inner diameter may be written negative or zero, which leaves a solid disc. */
+    private static final Pattern DONUT = Pattern.compile("donut_r" + NUM + "x(-?[0-9.]+)");
 
     public final Kind kind;
     public final double width;   // mm; diameter for ROUND/SQUARE/DONUT outer
@@ -112,9 +113,12 @@ public final class OdbSymbolShape {
         }
         m = DONUT.matcher(n);
         if (m.matches()) {
-            return new OdbSymbolShape(Kind.DONUT,
-                    Double.parseDouble(m.group(1)) * unitToMm, 0, 0,
-                    Double.parseDouble(m.group(2)) * unitToMm, null);
+            double outer = Double.parseDouble(m.group(1)) * unitToMm;
+            double inner = Double.parseDouble(m.group(2)) * unitToMm;
+            if (inner <= 0) {
+                return new OdbSymbolShape(Kind.ROUND, outer, 0, 0, 0, null);
+            }
+            return new OdbSymbolShape(Kind.DONUT, outer, 0, 0, inner, null);
         }
         m = THERMAL.matcher(n);
         if (m.matches()) {
@@ -135,6 +139,41 @@ public final class OdbSymbolShape {
             return new OdbSymbolShape(Kind.SQUARE, d, d, 0, 0, null);
         }
         return null;
+    }
+
+    /**
+     * This shape mirrored along the x axis (x becomes -x). Only shapes that are not
+     * symmetric about the y axis change: a rectangle with individually treated corners
+     * swaps its left and right corners, a thermal's first gap moves to the mirrored angle.
+     */
+    public OdbSymbolShape mirrored() {
+        if (kind == Kind.THERMAL) {
+            return new OdbSymbolShape(kind, width, height, cornerSize, innerDiameter, corners,
+                    180 - gapAngle, spokes, gap);
+        }
+        if (corners == null || allCorners()) {
+            return this;
+        }
+        StringBuilder swapped = new StringBuilder();
+        for (char c : corners.toCharArray()) {
+            swapped.append(switch (c) {
+                case '1' -> '2';
+                case '2' -> '1';
+                case '3' -> '4';
+                default -> '3';
+            });
+        }
+        return new OdbSymbolShape(kind, width, height, cornerSize, innerDiameter,
+                swapped.toString(), gapAngle, spokes, gap);
+    }
+
+    /** This shape with every dimension multiplied by {@code factor} (a resized pad). */
+    public OdbSymbolShape scaled(double factor) {
+        if (factor == 1.0) {
+            return this;
+        }
+        return new OdbSymbolShape(kind, width * factor, height * factor, cornerSize * factor,
+                innerDiameter * factor, corners, gapAngle, spokes, gap * factor);
     }
 
     /** Whether corner {@code n} (1-4, see {@link #corners}) gets the corner treatment. */

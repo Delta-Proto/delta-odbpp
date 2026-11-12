@@ -1,5 +1,6 @@
 package com.deltaproto.deltaodbpp.export.gerber;
 
+import com.deltaproto.deltaodbpp.export.render.StandardSymbolOutline;
 import com.deltaproto.deltaodbpp.model.Arc;
 import com.deltaproto.deltaodbpp.model.Barcode;
 import com.deltaproto.deltaodbpp.model.ContourPolygon;
@@ -13,6 +14,8 @@ import com.deltaproto.deltaodbpp.model.Surface;
 import com.deltaproto.deltaodbpp.model.Symbol;
 import com.deltaproto.deltaodbpp.model.Text;
 
+import java.awt.Shape;
+import java.awt.geom.PathIterator;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -168,7 +171,6 @@ public class GerberLayerExporter {
      */
     public void exportAsOutline(Features features, GerberWriter writer,
                                 ApertureRegistry registry, double strokeDiameterMm) {
-        double unitToMm = features.isMillimeters() ? 0.001 : 0.0254;
         for (Feature feature : features.getFeatures()) {
             if (feature instanceof Surface surface) {
                 writer.setPolarity(true);
@@ -189,10 +191,12 @@ public class GerberLayerExporter {
                     }
                 }
             } else if (feature instanceof Line line) {
-                exportLine(line, features, writer, registry, unitToMm,
+                exportLine(line, features, writer, registry,
+                        features.symbolUnitToMm(line.getSymbolNumber()),
                         FeatureTransform.IDENTITY, false);
             } else if (feature instanceof Arc arc) {
-                exportArc(arc, features, writer, registry, unitToMm,
+                exportArc(arc, features, writer, registry,
+                        features.symbolUnitToMm(arc.getSymbolNumber()),
                         FeatureTransform.IDENTITY, false);
             }
         }
@@ -201,21 +205,22 @@ public class GerberLayerExporter {
 
     private void export(Features features, GerberWriter writer, ApertureRegistry registry,
                         FeatureTransform transform, int depth, boolean invertPolarity) {
-        double unitToMm = features.isMillimeters() ? 0.001 : 0.0254;
-
         for (Feature feature : features.getFeatures()) {
             if (feature instanceof Pad pad) {
-                exportPad(pad, features, writer, registry, unitToMm, transform, depth, invertPolarity);
+                exportPad(pad, features, writer, registry,
+                        features.symbolUnitToMm(pad.getSymbolNumber()), transform, depth, invertPolarity);
             } else if (feature instanceof Line line) {
                 if (depth == 0 && strokeOnOutline(line)) {
                     continue;
                 }
-                exportLine(line, features, writer, registry, unitToMm, transform, invertPolarity);
+                exportLine(line, features, writer, registry,
+                        features.symbolUnitToMm(line.getSymbolNumber()), transform, invertPolarity);
             } else if (feature instanceof Arc arc) {
                 if (depth == 0 && strokeOnOutline(arc)) {
                     continue;
                 }
-                exportArc(arc, features, writer, registry, unitToMm, transform, invertPolarity);
+                exportArc(arc, features, writer, registry,
+                        features.symbolUnitToMm(arc.getSymbolNumber()), transform, invertPolarity);
             } else if (feature instanceof Surface surface) {
                 exportSurface(surface, writer, transform, invertPolarity);
             } else if (feature instanceof Text text) {
@@ -247,16 +252,36 @@ public class GerberLayerExporter {
                         depth + 1, negative);
                 return;
             }
+            // A standard symbol no aperture describes (a rectangular donut, a square
+            // thermal, a stencil shape): its outline, drawn as regions.
+            Shape outline = StandardSymbolOutline.of(symbolName, unitToMm);
+            if (outline != null) {
+                double resize = pad.getResizeFactor() != null && pad.getResizeFactor() > 0
+                        ? pad.getResizeFactor() : 1.0;
+                exportOutline(outline, resize, writer, transform.compose(pad.getX(), pad.getY(),
+                        padRotationCw(pad), padMirrored(pad)), !negative);
+                return;
+            }
             warnings.add("Unsupported pad symbol '" + symbolName
                     + "' approximated by a 0.1mm circle");
             shape = OdbSymbolShape.parse(String.format(Locale.ROOT, "r%f", 0.1 / unitToMm), unitToMm);
         }
 
-        double rotationCw = effectiveRotation(transform, padRotationCw(pad), padMirrored(pad));
-        double[] position = transform.apply(pad.getX(), pad.getY());
+        if (pad.getResizeFactor() != null && pad.getResizeFactor() > 0) {
+            shape = shape.scaled(pad.getResizeFactor());
+        }
+        // The pad's own orientation composed with the placement of the symbol it sits
+        // in. An aperture can only be rotated, so a mirrored result is drawn as the
+        // mirrored shape turned the other way (mirror(rotate(s, a)) = rotate(mirror(s), -a)).
+        FeatureTransform placed = transform.compose(pad.getX(), pad.getY(),
+                padRotationCw(pad), padMirrored(pad));
+        double rotationCw = placed.mirrored ? -placed.rotationCwDeg : placed.rotationCwDeg;
+        if (placed.mirrored) {
+            shape = shape.mirrored();
+        }
         writer.setPolarity(!negative);
         writer.selectAperture(registry.forShape(shape, rotationCw));
-        writer.flash(position[0], position[1]);
+        writer.flash(placed.dx, placed.dy);
     }
 
     private void exportLine(Line line, Features features, GerberWriter writer,
@@ -323,6 +348,73 @@ public class GerberLayerExporter {
         }
     }
 
+    /** Curves of a symbol outline are flattened to within this distance (mm). */
+    private static final double OUTLINE_FLATNESS_MM = 0.001;
+
+    /**
+     * Draws a symbol outline given about its own origin: one region per filled part, each
+     * fractured around the openings it contains.
+     */
+    private void exportOutline(Shape outline, double scale, GerberWriter writer,
+                               FeatureTransform placement, boolean dark) {
+        List<RegionFracturer.Ring> rings = new ArrayList<>();
+        RegionFracturer.Ring current = null;
+        double[] c = new double[6];
+        for (PathIterator it = outline.getPathIterator(null, OUTLINE_FLATNESS_MM / scale);
+             !it.isDone(); it.next()) {
+            int type = it.currentSegment(c);
+            if (type == PathIterator.SEG_CLOSE) {
+                continue;
+            }
+            if (type == PathIterator.SEG_MOVETO) {
+                current = new RegionFracturer.Ring();
+                rings.add(current);
+            }
+            double[] p = placement.apply(c[0] * scale, c[1] * scale);
+            int n = current.size();
+            if (n > 0 && Math.abs(current.vertices.get(n - 1)[0] - p[0]) < 1e-9
+                    && Math.abs(current.vertices.get(n - 1)[1] - p[1]) < 1e-9) {
+                continue;
+            }
+            current.add(p[0], p[1], null);
+        }
+        // The largest ring is filled; rings wound the other way are openings.
+        double reference = 0;
+        for (RegionFracturer.Ring ring : rings) {
+            dropClosingVertex(ring);
+            double area = RegionFracturer.signedArea(ring);
+            if (Math.abs(area) > Math.abs(reference)) {
+                reference = area;
+            }
+        }
+        List<RegionFracturer.Ring> islands = new ArrayList<>();
+        List<RegionFracturer.Ring> holes = new ArrayList<>();
+        for (RegionFracturer.Ring ring : rings) {
+            double area = RegionFracturer.signedArea(ring);
+            if (ring.size() < 3 || Math.abs(area) < 1e-9) {
+                continue;
+            }
+            (area * reference > 0 ? islands : holes).add(ring);
+        }
+        if (islands.isEmpty()) {
+            return;
+        }
+        writer.setPolarity(dark);
+        for (RegionFracturer.Ring ring : RegionFracturer.fractureGroup(islands, holes)) {
+            emitRegion(ring, writer);
+        }
+    }
+
+    /** A flattened contour repeats its first point at the end; a ring closes by itself. */
+    private static void dropClosingVertex(RegionFracturer.Ring ring) {
+        int n = ring.size();
+        if (n > 1 && Math.abs(ring.vertices.get(0)[0] - ring.vertices.get(n - 1)[0]) < 1e-9
+                && Math.abs(ring.vertices.get(0)[1] - ring.vertices.get(n - 1)[1]) < 1e-9) {
+            ring.vertices.remove(n - 1);
+            ring.edges.remove(n - 1);
+        }
+    }
+
     private void emitRegion(RegionFracturer.Ring ring, GerberWriter writer) {
         int n = ring.size();
         if (n == 0) {
@@ -386,14 +478,15 @@ public class GerberLayerExporter {
                     double ys = lineDef.getYs() * scaleY;
                     double xe = (advance + lineDef.getXe() * scaleX);
                     double ye = lineDef.getYe() * scaleY;
-                    if (orient.mirrored) {
-                        xs = -xs;
-                        xe = -xe;
-                    }
+                    // Same order as a pad's orient_def: rotated first, then mirrored.
                     double rxs = xs * Math.cos(rad) - ys * Math.sin(rad);
                     double rys = xs * Math.sin(rad) + ys * Math.cos(rad);
                     double rxe = xe * Math.cos(rad) - ye * Math.sin(rad);
                     double rye = xe * Math.sin(rad) + ye * Math.cos(rad);
+                    if (orient.mirrored) {
+                        rxs = -rxs;
+                        rxe = -rxe;
+                    }
                     double[] start = transform.apply(text.getX() + rxs, text.getY() + rys);
                     double[] end = transform.apply(text.getX() + rxe, text.getY() + rye);
                     writer.moveTo(start[0], start[1]);
@@ -442,18 +535,6 @@ public class GerberLayerExporter {
                     + "' approximated by a circle (Gerber draws are circular only)");
         }
         return shape.strokeDiameter();
-    }
-
-    /**
-     * Combined pad + placement rotation. All supported aperture shapes are
-     * symmetric about both axes, so mirroring only negates the angle.
-     */
-    private double effectiveRotation(FeatureTransform transform, double padRotationCw,
-                                     boolean padMirrored) {
-        double local = padMirrored ? -padRotationCw : padRotationCw;
-        return transform.mirrored
-                ? transform.rotationCwDeg - local
-                : transform.rotationCwDeg + local;
     }
 
     /** orientationType 0-7 legacy (90° steps + mirror), 8/9 free rotation. */

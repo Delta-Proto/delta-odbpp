@@ -267,9 +267,10 @@ class SvgRendererTest {
         renderer.renderFeatures(features, writer);
 
         String svg = writer.toString();
-        // Check for rotation transform - angle and center point
-        assertTrue(svg.contains("transform=") && svg.contains("rotate(45"),
-                "Should contain rotation transform. Got: " + svg);
+        // ODB++ angles turn clockwise; in the renderer's Y-up user space that is a
+        // negative SVG rotation.
+        assertTrue(svg.contains("transform=") && svg.contains("rotate(-45"),
+                "Should contain a clockwise rotation transform. Got: " + svg);
     }
 
     @Test
@@ -389,5 +390,149 @@ class SvgRendererTest {
         String svg = writer.toString();
         assertTrue(svg.contains("<svg"), "Should contain svg element");
         assertTrue(svg.contains("<circle"), "Should still render holes with default size");
+    }
+
+    // ------------------------------------------------------------------
+    // The picture itself: rendered in millimetres and probed point by point
+    // ------------------------------------------------------------------
+
+    private static final java.util.regex.Pattern VIEW_BOX = java.util.regex.Pattern.compile(
+            "viewBox=\"(-?[\\d.]+) (-?[\\d.]+) (-?[\\d.]+) (-?[\\d.]+)\"");
+
+    private static double[] viewBox(String svg) {
+        java.util.regex.Matcher m = VIEW_BOX.matcher(svg);
+        assertTrue(m.find(), "no viewBox");
+        return new double[] {Double.parseDouble(m.group(1)), Double.parseDouble(m.group(2)),
+                Double.parseDouble(m.group(3)), Double.parseDouble(m.group(4))};
+    }
+
+    private static String renderMm(Features features) throws IOException {
+        SvgRenderer mm = new SvgRenderer(new SvgRenderOptions()
+                .withOutputUnit(SvgRenderOptions.OutputUnit.MM));
+        StringWriter writer = new StringWriter();
+        mm.renderFeatures(features, writer);
+        return writer.toString();
+    }
+
+    /** Whether the rendering has ink at a point given in mm, Y up. */
+    private static boolean ink(String svg, double x, double y) throws IOException {
+        double[] box = viewBox(svg);
+        int pxPerMm = 20;
+        int width = (int) Math.round(box[2] * pxPerMm);
+        java.awt.image.BufferedImage image = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(
+                MultiLayerSvgRenderer.rasterizeSvgToPng(svg, width)));
+        int px = (int) Math.floor((x - box[0]) / box[2] * image.getWidth());
+        // The frame is centred on the artwork, so its top edge is the largest y.
+        int py = (int) Math.floor((box[1] + box[3] - y) / box[3] * image.getHeight());
+        return (image.getRGB(px, py) >>> 24) > 127;
+    }
+
+    private static Pad pad(double x, double y, int symbol, String polarity) {
+        Pad pad = new Pad();
+        pad.setX(x);
+        pad.setY(y);
+        pad.setSymbolNumber(symbol);
+        pad.setPolarity(polarity);
+        return pad;
+    }
+
+    @Test
+    void negativeFeaturesClearWhatWasDrawnBeforeThem() throws IOException {
+        features.setUnits("MM");
+        features.getSymbolTable().put(0, "s10000");
+        features.getSymbolTable().put(1, "r6000");
+        features.getSymbolTable().put(2, "r2000");
+        features.getFeatures().add(pad(0, 0, 0, "P"));
+        features.getFeatures().add(pad(0, 0, 1, "N"));
+        features.getFeatures().add(pad(0, 0, 2, "P"));
+
+        String svg = renderMm(features);
+        assertTrue(svg.contains("<mask"), "clear paint needs a mask");
+        assertTrue(ink(svg, 4, 4), "the square outside the clearance");
+        assertFalse(ink(svg, 2, 0), "cleared by the negative pad");
+        assertFalse(ink(svg, 0, -2), "cleared all the way round");
+        assertTrue(ink(svg, 0, 0), "drawn after the clearance, so it stays");
+    }
+
+    @Test
+    void layerWithoutNegativeFeaturesNeedsNoMask() throws IOException {
+        features.setUnits("MM");
+        features.getSymbolTable().put(0, "s10000");
+        features.getFeatures().add(pad(0, 0, 0, "P"));
+
+        String svg = renderMm(features);
+        assertFalse(svg.contains("<mask"));
+        assertTrue(ink(svg, 4, 4));
+    }
+
+    @Test
+    void frameHoldsTheBulgeOfAnArc() throws IOException {
+        // A half circle from east to west over the top: its end points lie on y = 0.
+        features.setUnits("MM");
+        features.getSymbolTable().put(0, "r1000");
+        Arc arc = new Arc();
+        arc.setXs(10);
+        arc.setYs(0);
+        arc.setXe(-10);
+        arc.setYe(0);
+        arc.setXc(0);
+        arc.setYc(0);
+        arc.setCw("N");
+        arc.setSymbolNumber(0);
+        arc.setPolarity(Polarity.POSITIVE);
+        features.getFeatures().add(arc);
+
+        String svg = renderMm(features);
+        double[] box = viewBox(svg);
+        // Radius 10, half the 1 mm stroke above and below, 0.1 mm padding on either side.
+        assertEquals(11.2, box[3], 0.01, "the frame is as tall as the half circle and its stroke");
+        assertEquals(21.2, box[2], 0.01);
+        assertTrue(ink(svg, 0, 10), "the top of the arc is inside the picture");
+        assertFalse(ink(svg, 0, 0));
+    }
+
+    @Test
+    void frameHoldsThePadsOnItsEdgeWhole() throws IOException {
+        // A bar standing upright after a quarter turn, and a pad at four times its size.
+        features.setUnits("MM");
+        features.getSymbolTable().put(0, "rect4000x1000");
+        features.getSymbolTable().put(1, "r500");
+        Pad bar = pad(0, 0, 0, "P");
+        bar.setOrientationType(1);
+        Pad disc = pad(10, 0, 1, "P");
+        disc.setResizeFactor(4.0);
+        features.getFeatures().add(bar);
+        features.getFeatures().add(disc);
+
+        String svg = renderMm(features);
+        double[] box = viewBox(svg);
+        assertEquals(-0.6, box[0], 0.01, "half the width of the turned bar, and the padding");
+        assertEquals(11.7, box[2], 0.01, "from the bar's left side to the disc's right side");
+        assertEquals(4.2, box[3], 0.01, "the bar's length");
+        assertTrue(ink(svg, 0, 1.9), "the top of the bar");
+        assertTrue(ink(svg, 10.9, 0), "the rim of the disc");
+        assertFalse(ink(svg, 1.9, 0), "the bar stands upright");
+    }
+
+    @Test
+    void zeroWidthLinesStayVisible() throws IOException {
+        // Drawing layers are full of lines without a width; they are drawn as hairlines
+        // sized to the drawing, here a 2500th of 100 mm.
+        features.setUnits("MM");
+        features.getSymbolTable().put(0, "r0");
+        Line line = new Line();
+        line.setXs(0);
+        line.setYs(0);
+        line.setXe(100);
+        line.setYe(0);
+        line.setSymbolNumber(0);
+        line.setPolarity(Polarity.POSITIVE);
+        features.getFeatures().add(line);
+
+        String svg = renderMm(features);
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("stroke-width=\"([\\d.]+)\" fill=\"none\"").matcher(svg);
+        assertTrue(m.find(), "the line is a stroked path");
+        assertEquals(0.04, Double.parseDouble(m.group(1)), 0.005);
     }
 }

@@ -17,23 +17,32 @@ public class FeaturesFileParser {
     private static final String COORD = "(-?[\\d.]+)";
 
     // Pad format: P x y apt_def [P|N] orient [dcode] [;attr=val...]
-    // Extra fields may be present, so don't require $ at end
+    // apt_def is the symbol number, or "-1 <symbol number> <resize factor>" for a
+    // resized symbol. Extra fields may be present, so don't require $ at end
     private static final Pattern PAD_PATTERN = Pattern.compile(
-            "^P\\s+" + COORD + "\\s+" + COORD + "\\s+(\\d+)\\s+([PN])((?:\\s+-?[0-9.]+)*)(?:.*?;(.*))?");
+            "^P\\s+" + COORD + "\\s+" + COORD + "\\s+(?:-1\\s+(\\d+)\\s+(-?[0-9.]+)|(\\d+))\\s+([PN])((?:\\s+-?[0-9.]+)*)(?:.*?;(.*))?");
     // Line format: L xs ys xe ye apt_def [P|N] [dcode] [;attr=val...]
     private static final Pattern LINE_PATTERN = Pattern.compile(
             "^L\\s+" + COORD + "\\s+" + COORD + "\\s+" + COORD + "\\s+" + COORD + "\\s+(\\d+)(?:\\s+([PN]))?(?:\\s+(\\d+))?(?:.*?;(.*))?");
     // Arc format: A xs ys xe ye xc yc apt_def [P|N] [dcode] [Y|N] [;attr=val...]
     private static final Pattern ARC_PATTERN = Pattern.compile(
             "^A\\s+" + COORD + "\\s+" + COORD + "\\s+" + COORD + "\\s+" + COORD + "\\s+" + COORD + "\\s+" + COORD + "\\s+(\\d+)(?:\\s+([PN]))?(?:\\s+(\\d+))?(?:\\s+([YN]))?(?:.*?;(.*))?");
+    // Text, as the specification writes it:
+    //   T x y font polarity orient_def xsize ysize width_factor 'text' version [;attrs]
+    // where orient_def is 0-7 or "8 <angle>" / "9 <angle>".
     private static final Pattern TEXT_PATTERN = Pattern.compile(
+            "^T\\s+" + COORD + "\\s+" + COORD + "\\s+(\\S+)\\s+([PN])\\s+(\\d+)((?:\\s+-?[\\d.]+){3,4})"
+                    + "\\s+'(.*)'(?:\\s+(\\d+))?\\s*(?:;(.*))?$");
+    // Older shorthand some hand-written files use: T x y 'text' font orient Y|N
+    private static final Pattern LEGACY_TEXT_PATTERN = Pattern.compile(
             "^T\\s+" + COORD + "\\s+" + COORD + "\\s+'(.*)'\\s+(\\d+)\\s+(\\d+)\\s+([YN])(?:\\s*;(.*))?\\s*$");
     private static final Pattern BARCODE_PATTERN = Pattern.compile(
             "^B\\s+" + COORD + "\\s+" + COORD + "\\s+(\\S+)\\s+(\\S+)\\s+([PN])\\s+(\\d+)(?:\\s+([\\d.]+))?\\s+E\\s+" + COORD + "\\s+" + COORD + "\\s+([YN])\\s+([YN])\\s+([YN])\\s+([YN])\\s+([TB])\\s+'(.*?)'(?:;(\\d+)=([^;]*))?(?:;\\d+=[^;]*)*(?:;ID=(.*?))?\\s*$");
     private static final Pattern SURFACE_PATTERN = Pattern.compile(
             "^S\\s+([PN])\\s+(\\d+)\\s*(?:;(.*))?\\s*$");
 
-    // Symbol definition: $<num> <name> [M|I]
+    // Symbol definition: $<num> <name> [M|I] — the flag states the unit of the
+    // dimensions in the name (M = microns, I = mils) when it differs from the file's
     private static final Pattern SYMBOL_DEF_PATTERN = Pattern.compile(
             "^\\$(\\d+)\\s+(\\S+)(?:\\s+([MI]))?\\s*$");
 
@@ -150,13 +159,13 @@ public class FeaturesFileParser {
         if (matcher.find()) {
             int symbolNumber = Integer.parseInt(matcher.group(1));
             String symbolName = matcher.group(2);
-            String mirrorFlag = matcher.group(3);
+            String unitFlag = matcher.group(3);
 
             features.getSymbolTable().put(symbolNumber, symbolName);
 
-            // M = mirrored, I = not mirrored (default)
-            if ("M".equals(mirrorFlag)) {
-                features.getSymbolMirrorFlags().put(symbolNumber, true);
+            // M = dimensions in microns, I = in mils; absent = the file's unit
+            if (unitFlag != null) {
+                features.getSymbolMetricFlags().put(symbolNumber, "M".equals(unitFlag));
             }
         } else {
             // Fallback to simple parsing for edge cases
@@ -223,16 +232,24 @@ public class FeaturesFileParser {
             Pad pad = new Pad();
             pad.setX(Double.parseDouble(matcher.group(1)) * mmScale);
             pad.setY(Double.parseDouble(matcher.group(2)) * mmScale);
-            pad.setSymbolNumber(Integer.parseInt(matcher.group(3)));
-            // Polarity is in group 4
-            String polarity = matcher.group(4);
+            if (matcher.group(3) != null) {
+                // "-1 <symbol> <resize factor>": the symbol scaled by the factor
+                pad.setSymbolNumber(Integer.parseInt(matcher.group(3)));
+                double resize = Double.parseDouble(matcher.group(4));
+                if (resize > 0 && resize != 1.0) {
+                    pad.setResizeFactor(resize);
+                }
+            } else {
+                pad.setSymbolNumber(Integer.parseInt(matcher.group(5)));
+            }
+            String polarity = matcher.group(6);
             pad.setPolarity(polarity);
             // Spec: P x y sym_num polarity dcode orient_def, where orient_def is
             // 0-7 (90-degree steps, 4-7 mirrored) or "8 <angle>" / "9 <angle>"
-            // (free clockwise rotation, 9 mirrored). Group 5 holds the numeric
+            // (free clockwise rotation, 9 mirrored). Group 7 holds the numeric
             // tail; a single number is taken as the orient_def (dcode omitted).
-            String[] tail = matcher.group(5).trim().isEmpty()
-                    ? new String[0] : matcher.group(5).trim().split("\\s+");
+            String[] tail = matcher.group(7).trim().isEmpty()
+                    ? new String[0] : matcher.group(7).trim().split("\\s+");
             String orient = "0";
             String angle = null;
             if (tail.length == 1) {
@@ -249,10 +266,10 @@ public class FeaturesFileParser {
             if (orientationType >= 8) {
                 pad.setCustomRotation(angle != null ? Double.parseDouble(angle) : 0.0);
             }
-            // Attributes in group 6 (optional)
-            if (matcher.group(6) != null) {
+            // Attributes in group 8 (optional)
+            if (matcher.group(8) != null) {
                 StringBuilder uniqueId = new StringBuilder();
-                parseAttributes(matcher.group(6), pad.getAttributes(), uniqueId);
+                parseAttributes(matcher.group(8), pad.getAttributes(), uniqueId);
                 if (uniqueId.length() > 0) {
                     pad.setUniqueId(uniqueId.toString());
                 }
@@ -364,15 +381,38 @@ public class FeaturesFileParser {
             Text text = new Text();
             text.setX(Double.parseDouble(matcher.group(1)) * mmScale);
             text.setY(Double.parseDouble(matcher.group(2)) * mmScale);
+            text.setFont(matcher.group(3));
+            text.setPolarity(Polarity.fromString(matcher.group(4)));
+            // The numeric tail is "xsize ysize width_factor", preceded by the free
+            // rotation angle when orient_def is 8 or 9.
+            String[] tail = matcher.group(6).trim().split("\\s+");
+            int orient = Integer.parseInt(matcher.group(5));
+            int at = 0;
+            if (orient >= 8 && tail.length >= 4) {
+                text.setOrientDef(orient + " " + tail[at++]);
+            } else {
+                text.setOrientDef(String.valueOf(orient));
+            }
+            if (tail.length - at >= 3) {
+                text.setXsize(Double.parseDouble(tail[at]) * mmScale);
+                text.setYsize(Double.parseDouble(tail[at + 1]) * mmScale);
+                text.setWidthFactor(Double.parseDouble(tail[at + 2]));
+            }
+            text.setText(matcher.group(7));
+            if (matcher.group(8) != null) {
+                text.setVersion(Integer.parseInt(matcher.group(8)));
+            }
+            features.getFeatures().add(text);
+            return;
+        }
+        matcher = LEGACY_TEXT_PATTERN.matcher(line);
+        if (matcher.find()) {
+            Text text = new Text();
+            text.setX(Double.parseDouble(matcher.group(1)) * mmScale);
+            text.setY(Double.parseDouble(matcher.group(2)) * mmScale);
             text.setText(matcher.group(3));
-            // Store font from group 4 (if present)
-            if (matcher.groupCount() >= 4 && matcher.group(4) != null) {
-                text.setFont(matcher.group(4));
-            }
-            // Store orientation as orientDef string
-            if (matcher.groupCount() >= 5 && matcher.group(5) != null) {
-                text.setOrientDef(matcher.group(5));
-            }
+            text.setFont(matcher.group(4));
+            text.setOrientDef(matcher.group(5));
             features.getFeatures().add(text);
         }
     }

@@ -1096,15 +1096,17 @@
 
         // Recolor the soldermask + silkscreen of a realistic SVG to the selected color.
         // The renderer tags the mask rect (.pcb-soldermask) and silkscreen group
-        // (.pcb-silkscreen); silkscreen child shapes carry explicit fill/stroke, so we
-        // rewrite each non-"none" value to match what the renderer would emit. No-op on
-        // the all-layers view, which has neither marker.
+        // (.pcb-silkscreen). The group sets the paint its shapes inherit; a shape that
+        // carries an explicit fill/stroke of its own has each non-"none" value rewritten
+        // to match what the renderer would emit. No-op on the all-layers view, which has
+        // neither marker.
         function applySoldermaskColor(svgEl) {
             const c = SOLDERMASK_COLORS[selectedSoldermask];
             if (!svgEl || !c) return;
             svgEl.querySelectorAll('.pcb-soldermask').forEach(el => el.setAttribute('fill', c.mask));
             svgEl.querySelectorAll('.pcb-silkscreen').forEach(g => {
                 g.setAttribute('fill', c.silk);
+                g.setAttribute('stroke', c.silk);
                 g.setAttribute('color', c.silk);
                 g.querySelectorAll('*').forEach(el => {
                     const f = el.getAttribute('fill');

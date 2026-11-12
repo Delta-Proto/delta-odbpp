@@ -895,7 +895,8 @@ class SvgExportIntegrationTest {
         String nonPlatedSvg = nonPlatedRenderer.render(0, 0, 0, false, 1.0, "#00FF00");
         assertNotNull(nonPlatedSvg, "Should render non-plated hole");
         assertTrue(nonPlatedSvg.contains("circle"), "Non-plated hole should contain circle element");
-        assertTrue(nonPlatedSvg.contains("line"), "Non-plated hole should contain cross lines");
+        // Plating says how a hole is made, not what it looks like: both are a plain disc.
+        assertFalse(nonPlatedSvg.contains("line"), "Non-plated hole should be a plain disc");
     }
 
     // ==================== Home Plate Symbol Tests ====================

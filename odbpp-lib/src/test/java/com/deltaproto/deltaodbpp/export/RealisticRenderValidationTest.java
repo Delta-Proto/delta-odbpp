@@ -19,6 +19,8 @@ import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -155,13 +157,19 @@ class RealisticRenderValidationTest {
         for (String id : new String[] {"sm-top-mask", "cf-top-mask", "mech-mask"}) {
             Element mask = findById(topDoc, id);
             assertNotNull(mask, id + " missing");
-            NodeList groups = mask.getElementsByTagNameNS("*", "g");
-            assertTrue(groups.getLength() > 0, id + " should hold at least one layer group");
-            for (int i = 0; i < groups.getLength(); i++) {
-                Element g = (Element) groups.item(i);
-                if (!g.getAttribute("stroke").isEmpty() && !"none".equals(g.getAttribute("stroke"))) {
-                    assertEquals("0", g.getAttribute("stroke-width"),
-                            id + ": a group with stroke=" + g.getAttribute("stroke")
+            // A mask holds its layers as groups or as references to artwork drawn once.
+            List<Element> layers = new ArrayList<>();
+            for (String tag : new String[] {"g", "use"}) {
+                NodeList found = mask.getElementsByTagNameNS("*", tag);
+                for (int i = 0; i < found.getLength(); i++) {
+                    layers.add((Element) found.item(i));
+                }
+            }
+            assertFalse(layers.isEmpty(), id + " should hold at least one layer");
+            for (Element layer : layers) {
+                if (!layer.getAttribute("stroke").isEmpty() && !"none".equals(layer.getAttribute("stroke"))) {
+                    assertEquals("0", layer.getAttribute("stroke-width"),
+                            id + ": a layer with stroke=" + layer.getAttribute("stroke")
                                     + " must set stroke-width=\"0\"");
                 }
             }
@@ -174,6 +182,47 @@ class RealisticRenderValidationTest {
         // drill holes through the board.
         assertNotNull(findById(topDoc, "mech-mask"),
                 "mech-mask missing — the board has drills and they should punch through");
+    }
+
+    @Test
+    void blindHolesAreDimplesNotCutouts() {
+        // The sample has laser vias that stop inside the board. From either side they are
+        // a dimple in the outer layer; only holes that go all the way through show daylight.
+        for (Document doc : new Document[] {topDoc, bottomDoc}) {
+            Element blind = findElementByAttr(doc, "g", "data-stack-layer", "blind-holes");
+            assertNotNull(blind, "blind-holes group missing");
+            NodeList dimples = blind.getElementsByTagName("use");
+            assertTrue(dimples.getLength() > 0, "blind-holes group is empty");
+
+            java.util.Set<String> punched = new java.util.HashSet<>();
+            NodeList cutouts = findById(doc, "mech-mask").getElementsByTagName("use");
+            for (int i = 0; i < cutouts.getLength(); i++) {
+                punched.add(((Element) cutouts.item(i)).getAttribute("href"));
+            }
+            assertFalse(punched.isEmpty(), "through holes must still punch the board");
+            for (int i = 0; i < dimples.getLength(); i++) {
+                String href = ((Element) dimples.item(i)).getAttribute("href");
+                assertNotNull(findById(doc, href.substring(1)), href + " is not defined");
+                assertFalse(punched.contains(href), href + " is blind and must not punch through");
+            }
+        }
+    }
+
+    @Test
+    void blindHolesLieUnderTheSoldermask() {
+        Element board = findById(topDoc, "board");
+        int blindIdx = -1, copperIdx = -1, maskIdx = -1;
+        NodeList kids = board.getChildNodes();
+        for (int i = 0; i < kids.getLength(); i++) {
+            if (kids.item(i) instanceof Element el) {
+                String stack = el.getAttribute("data-stack-layer");
+                if ("blind-holes".equals(stack)) blindIdx = i;
+                else if ("copper".equals(stack)) copperIdx = i;
+                else if ("soldermask".equals(stack)) maskIdx = i;
+            }
+        }
+        assertTrue(blindIdx > copperIdx, "a dimple is drawn on the copper it is drilled in");
+        assertTrue(blindIdx < maskIdx, "and the soldermask covers it where it is tented");
     }
 
     @Test

@@ -39,12 +39,16 @@ final class FeatureTransform {
         return new double[] {rx + dx, ry + dy};
     }
 
-    /** Composes an inner placement (within this transformed frame). */
+    /**
+     * Composes an inner placement (within this transformed frame). Each placement is
+     * "rotate, then mirror": pulling the inner mirror out in front of this rotation
+     * reverses that rotation, so the angles subtract when the inner placement is mirrored.
+     */
     FeatureTransform compose(double x, double y, double rotationCwDeg, boolean mirrored) {
         double[] origin = apply(x, y);
         boolean newMirror = this.mirrored ^ mirrored;
-        double newRotation = this.mirrored
-                ? this.rotationCwDeg - rotationCwDeg
+        double newRotation = mirrored
+                ? rotationCwDeg - this.rotationCwDeg
                 : this.rotationCwDeg + rotationCwDeg;
         return new FeatureTransform(origin[0], origin[1], newRotation, newMirror);
     }

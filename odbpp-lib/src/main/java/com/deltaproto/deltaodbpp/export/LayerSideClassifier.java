@@ -108,6 +108,15 @@ public final class LayerSideClassifier {
         return visible != null && visible.contains(side);
     }
 
+    /**
+     * @return true if this drill layer goes all the way through the board: it is
+     *     visible from both sides. Blind holes stop inside the board.
+     */
+    public boolean drillThrough(String drillLayerName) {
+        return drillVisibleFrom(drillLayerName, LayerSide.TOP)
+                && drillVisibleFrom(drillLayerName, LayerSide.BOTTOM);
+    }
+
     private LayerSide classify(MatrixLayer ml) {
         String type = normalize(ml.getType());
         String lowerName = ml.getName().toLowerCase(Locale.ROOT);

@@ -68,8 +68,6 @@ public class ExcellonWriter {
      */
     public Result export(Features features, Tools tools, String fileFunction) {
         List<String> warnings = new ArrayList<>();
-        double unitToMm = features.isMillimeters() ? 0.001 : 0.0254;
-
         // diameter key -> operations, ascending diameter
         Map<Long, StringBuilder> opsByDiameter = new TreeMap<>();
         Map<Long, Double> diameterByKey = new TreeMap<>();
@@ -90,7 +88,8 @@ public class ExcellonWriter {
                 continue;
             }
             String symbolName = features.getSymbolName(symbolNumber);
-            OdbSymbolShape shape = OdbSymbolShape.parse(symbolName, unitToMm);
+            OdbSymbolShape shape = OdbSymbolShape.parse(symbolName,
+                    features.symbolUnitToMm(symbolNumber));
             if (shape == null) {
                 warnings.add("Unsupported drill symbol '" + symbolName
                         + "'; defaulting to 0.1 mm");
