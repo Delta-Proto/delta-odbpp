@@ -125,7 +125,14 @@ public final class StackupLayer {
         return lossTangent;
     }
 
-    /** Copper weight in oz/ft², or null when the layer is not a conductor. */
+    /**
+     * Copper weight in oz/ft², or null when the layer is not a conductor.
+     *
+     * <p>When the archive states the copper through a layer's {@code .copper_weight} attribute this
+     * and {@link #getThicknessMm()} are two forms of that one statement, at 35 µm per oz/ft²: an
+     * archive that writes a thickness gets its weight derived, one that writes a weight gets its
+     * thickness derived, and neither is flagged estimated.
+     */
     public Double getCopperWeightOz() {
         return copperWeightOz;
     }

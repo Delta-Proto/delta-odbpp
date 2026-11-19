@@ -109,26 +109,36 @@ class StackupAttrlistTest {
 
     /**
      * Copper layers carry a {@code .layer_dielectric} holding the <em>adjacent</em> dielectric's
-     * thickness. Reading it as the copper's own would make a 35 µm foil 99 µm or 1.2 mm thick.
+     * thickness. Reading it as the copper's own would make a 35 µm foil 99 µm or 1.2 mm thick; the
+     * copper's own thickness is the {@code .copper_weight} next to it.
      */
     @Test
     void copperLayer_doesNotTakeItsThicknessFromLayerDielectric() {
         for (String name : List.of("top", "gnd", "pwr", "bot")) {
             StackupLayer copper = named(name);
-            assertTrue(copper.isThicknessEstimated(),
-                    name + " has no copper thickness of its own in the archive");
             assertNotEquals(0.0994, copper.getThicknessMm(), 1e-9);
             assertNotEquals(1.2, copper.getThicknessMm(), 1e-9);
         }
-        assertEquals(0.035, named("top").getThicknessMm(), 1e-9, "outer copper typical");
-        assertEquals(0.018, named("gnd").getThicknessMm(), 1e-9, "inner copper typical");
     }
 
+    /** Under {@code UNITS=MM} the attribute is the copper thickness in micrometres, and is stated. */
     @Test
-    void copperLayer_takesItsWeightFromCopperWeight() {
-        assertEquals(1.42851959, named("top").getCopperWeightOz().doubleValue());
+    void copperLayer_takesItsThicknessFromCopperWeight() {
+        assertEquals(35_001_000L, named("top").getThicknessPm());
+        assertEquals(35_001_000L, named("bot").getThicknessPm());
+        assertEquals(17_501_000L, named("gnd").getThicknessPm());
+        assertEquals(17_501_000L, named("pwr").getThicknessPm());
+        for (String name : List.of("top", "gnd", "pwr", "bot")) {
+            assertTrue(named(name).isThicknessMeasured(), name + " states its copper thickness");
+        }
+    }
+
+    /** The weight is the same statement in ounces — 35 µm to the ounce — not a second guess. */
+    @Test
+    void copperLayer_weightAgreesWithItsThickness() {
+        assertEquals(35.001 / 35.0, named("top").getCopperWeightOz(), 1e-9);
         assertFalse(named("top").isCopperWeightEstimated());
-        assertEquals(1.0, named("gnd").getCopperWeightOz().doubleValue());
+        assertEquals(17.501 / 35.0, named("gnd").getCopperWeightOz(), 1e-9);
         assertFalse(named("gnd").isCopperWeightEstimated());
     }
 

@@ -51,8 +51,10 @@ import java.util.Map;
  * majority of ODB++ in the wild, does not emit it. What Altium does emit is
  * {@code steps/<step>/layers/<layer>/attrlist} carrying {@code .layer_dielectric} (thickness of
  * material — also the mask thickness on a solder mask and the stencil thickness on a paste layer),
- * {@code .dielectric_constant}, {@code .loss_tangent} and {@code .comment} (the laminate name), plus
- * {@code .board_thickness} on the product model. That is a real per-layer stackup, and
+ * {@code .dielectric_constant}, {@code .loss_tangent} and {@code .comment} (the laminate name),
+ * {@code .copper_weight} on the copper layers (the copper thickness in micrometres under
+ * {@code UNITS=MM}, the weight in oz/ft² otherwise), plus {@code .board_thickness} on the product
+ * model. That is a real per-layer stackup, and
  * {@link #resolve(Job, Step)} reads it.
  *
  * <p>Anything neither source answers falls back to an industry typical, and every value carries a
@@ -67,6 +69,19 @@ public final class StackupResolver {
     private static final double OUTER_COPPER_OZ = 1.0;
     private static final double INNER_COPPER_OZ = 0.5;
     private static final long DIELECTRIC_PM = 200_000_000L;      // 0.2 mm
+
+    /**
+     * Thickness of 1 oz/ft² of copper: 35 µm, the figure the industry rounds to and the one writers
+     * use when they turn a design's copper thickness into the ounces of {@code .copper_weight}.
+     * Observed divisors run from 34.8 to 35.8 µm (KiCad exactly 35, current Altium 1.378 mil =
+     * 35.0012, older Altium 1.41 mil), so a thickness derived from a stated weight is within about
+     * 2 % — under a micrometre at 1 oz — of the value the designer entered.
+     */
+    static final long COPPER_PM_PER_OZ = 35_000_000L;
+    /** Thinnest copper taken as stated: 5 µm, the thinnest foil laminated in practice. */
+    static final long MIN_COPPER_PM = 5_000_000L;
+    /** Thickest copper taken as stated: 420 µm, 12 oz, the top of heavy-copper fabrication. */
+    static final long MAX_COPPER_PM = 420_000_000L;
     private static final double LAMINATE_DK = 4.3;               // FR-4
     private static final double LAMINATE_DF = 0.02;
     private static final long SOLDER_MASK_PM = 15_000_000L;      // 0.015 mm
@@ -348,35 +363,64 @@ public final class StackupResolver {
                 m.materialName = attrText(attrs, ".comment");
             }
             if (isConductor(function)) {
-                m.copperWeightOz = copperWeightOz(attrs);
+                readCopperWeight(attrs, m);
             }
             return m;
         }
 
         /**
-         * Copper weight in oz/ft² from {@code .copper_weight}, or null when it is absent or absurd.
+         * Copper thickness and weight from {@code .copper_weight}; leaves both unset when the
+         * attribute is absent or states nothing a foil could be.
          *
-         * <p>The attribute's unit is genuinely ambiguous. The spec calls it "the weight of copper
-         * according to its Units of Measurement" — a length convention applied to a weight — and
-         * 8.1 renamed its display name from Copper Weight to Copper Thickness, which points the other
-         * way. Two things settle it for reading purposes: the spec's own default is {@code 1.0}, and
-         * observed archives write exactly {@code 1} on inner layers, which is the standard 1 oz
-         * inner foil and would be an odd 1 mil (0.73 oz) under the thickness reading.
+         * <p>The spec calls the attribute "the weight of copper according to its Units of
+         * Measurement", and 8.1 renamed its display name from Copper Weight to Copper Thickness.
+         * Writers resolve that the same way, consistently across Altium, Cadence, Mentor and KiCad
+         * exports: an attrlist that declares {@code UNITS=MM} carries the copper <em>thickness in
+         * micrometres</em> ({@code 70}, {@code 35.001}, {@code 17.501}); one that declares
+         * {@code UNITS=INCH}, or declares no unit at all, carries the <em>weight in oz/ft²</em>
+         * ({@code 1}, {@code 0.51429608}, {@code 2.0}). The job's unit does not enter into it —
+         * KiCad writes ounces into a unit-less attrlist of an otherwise metric job.
          *
-         * <p>So it is read as ounces. Deliberately, no copper <em>thickness</em> is derived from it:
-         * that would turn a still-uncertain unit into a number that feeds board-thickness sums, and
-         * copper thickness stays an industry typical, flagged estimated, as it was before.
+         * <p>The reading the attrlist's unit calls for is tried first. When it lands outside
+         * anything a copper foil could be ({@link #MIN_COPPER_PM}–{@link #MAX_COPPER_PM}) the other
+         * reading is tried, so an ounce figure in a metric attrlist is still understood — a 1 µm
+         * foil does not exist, a 1 oz one is the norm. When neither reading is plausible — the
+         * {@code 0} writers park on non-copper layers, or a stray value — nothing is taken and the
+         * caller falls back to the typical, flagged estimated.
+         *
+         * <p>Either way both properties are filled from the one stated number, converted at
+         * {@link #COPPER_PM_PER_OZ}, so the thickness and the weight of a layer always agree, and
+         * both count as the archive's own statement rather than an estimate.
          */
-        private static Double copperWeightOz(AttrList attrs) {
-            Double oz = attrDouble(attrs, ".copper_weight");
-            return oz != null && oz > 0.05 && oz <= 20.0 ? oz : null;
+        private static void readCopperWeight(AttrList attrs, ResolvedMaterial m) {
+            Double raw = attrDouble(attrs, ".copper_weight");
+            if (raw == null || raw <= 0 || raw.isNaN() || raw.isInfinite()) {
+                return;
+            }
+            long asMicrons = Math.round(raw * 1_000_000.0);
+            long asOunces = Math.round(raw * COPPER_PM_PER_OZ);
+            boolean micronsFirst = isMm(attrs.getUnits(), false);
+            long first = micronsFirst ? asMicrons : asOunces;
+            long second = micronsFirst ? asOunces : asMicrons;
+            long pm = plausibleCopperPm(first) ? first : plausibleCopperPm(second) ? second : -1;
+            if (pm < 0) {
+                return;
+            }
+            m.thicknessPm = pm;
+            // Keep the ounce figure exactly as written when ounces is what was written.
+            m.copperWeightOz = pm == asOunces ? raw : pm / (double) COPPER_PM_PER_OZ;
+        }
+
+        private static boolean plausibleCopperPm(long pm) {
+            return pm >= MIN_COPPER_PM && pm <= MAX_COPPER_PM;
         }
 
         /**
          * {@code .layer_dielectric} is "thickness of material", but only on the layer types the spec
          * gives it a meaning for (pg 207): DIELECTRIC and SOLDER_MASK, plus SOLDER_PASTE where it is
          * the stencil thickness. On a copper layer Altium writes the <em>adjacent</em> dielectric's
-         * thickness into it, which is emphatically not the copper's, so copper is excluded.
+         * thickness into it, which is emphatically not the copper's, so copper is excluded — its
+         * thickness comes from {@code .copper_weight} instead.
          */
         private static boolean carriesMaterialThickness(String function) {
             return "DIELECTRIC".equals(function) || "SOLDER_MASK".equals(function)
