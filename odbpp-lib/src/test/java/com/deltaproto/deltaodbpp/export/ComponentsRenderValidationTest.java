@@ -166,15 +166,10 @@ class ComponentsRenderValidationTest {
     }
 
     @Test
-    void bottomSvg_hasDistinctColorFromTop() {
-        // Top uses a blue-ish fill, bottom an orange-ish fill — these are renderer
-        // constants; guard against accidental copy-paste between the two sides.
-        assertTrue(topSvg.contains("#6aaed6"),
-                "top components should use blue fill #6aaed6");
-        assertTrue(bottomSvg.contains("#e89654"),
-                "bottom components should use orange fill #e89654");
-        assertFalse(topSvg.contains("#e89654"), "top must not use bottom colour");
-        assertFalse(bottomSvg.contains("#6aaed6"), "bottom must not use top colour");
+    void bodiesArePlainGrey_onBothSides() {
+        // Bodies are grey with lighter pads on either side; only the pin-1 inlay is coloured.
+        assertTrue(topSvg.contains("fill=\"#6b6b6b\""), "top bodies should be grey");
+        assertTrue(bottomSvg.contains("fill=\"#6b6b6b\""), "bottom bodies should be grey");
     }
 
     @Test

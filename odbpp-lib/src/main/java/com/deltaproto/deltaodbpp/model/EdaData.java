@@ -2,6 +2,7 @@ package com.deltaproto.deltaodbpp.model;
 
 import lombok.Data;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -40,8 +41,9 @@ public class EdaData {
         private double pitch;
         private double xMin, yMin, xMax, yMax;
         private int index;
-        private List<PinRecord> pinRecords;
-        private Map<String, PinRecord> pinRecordsByName;
+        /** The package's pins in file order; a toeprint's pin number indexes this list. */
+        private List<PinRecord> pinRecords = new ArrayList<>();
+        private Map<String, PinRecord> pinRecordsByName = new LinkedHashMap<>();
         private Map<String, String> attributes;
         /**
          * The package body outline in the package-local frame (mm after parsing), as the
@@ -80,5 +82,16 @@ public class EdaData {
         private String mountType;
         private int id;
         private int index;
+        /**
+         * The pin's pad outline in the package-local frame (mm after parsing), from the
+         * {@code RC} / {@code CR} / {@code SQ} / {@code CT} record(s) that follow the
+         * {@code PIN} line. Empty when the writer gave none.
+         */
+        private List<ContourPolygon> outline = new ArrayList<>();
+
+        /** Whether the record carries an outline (see {@link #getOutline()}). */
+        public boolean hasOutline() {
+            return outline != null && !outline.isEmpty();
+        }
     }
 }

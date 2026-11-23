@@ -158,4 +158,28 @@ class ComponentsParserTest {
         assertEquals(-1.500, comp.getX(), 0.001);
         assertEquals(-2.000, comp.getY(), 0.001);
     }
+
+    @Test
+    void testParseToeprints(@TempDir Path tempDir) throws IOException {
+        String content = """
+            CMP 0 1.0 2.0 90.0 N U1 SOIC8
+            PRP id 'x'
+            TOP 0 0.5 2.25 90.0 N 3 0 1
+            TOP 1 1.5 2.25 90.0 N 4 1 2;0=1
+            CMP 1 3.0 4.0 0.0 N R1 0402
+            """;
+        Path componentsFile = tempDir.resolve("components");
+        Files.writeString(componentsFile, content);
+
+        Components components = parser.parse(componentsFile, 25.4);
+
+        Component u1 = components.getComponents().get(0);
+        assertEquals(2, u1.getToeprintRecords().size());
+        assertEquals(0, u1.getToeprintRecords().get(0).getPinNumber());
+        assertEquals(0.5 * 25.4, u1.getToeprintRecords().get(0).getX(), 1e-9);
+        assertEquals(2.25 * 25.4, u1.getToeprintRecords().get(0).getY(), 1e-9);
+        assertEquals(3, u1.getToeprintRecords().get(0).getNetNumber());
+        assertEquals("2", u1.getToeprintRecords().get(1).getName());
+        assertTrue(components.getComponents().get(1).getToeprintRecords().isEmpty());
+    }
 }

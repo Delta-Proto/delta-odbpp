@@ -28,8 +28,12 @@ import java.util.List;
  * </pre>
  *
  * <p>Only the outline between the {@code PKG} line and its first {@code PIN} is the
- * package's own; each pin has an outline of its own in the same forms, which this parser
- * skips. The outline is kept as {@link ContourPolygon}s whatever form it was written in.
+ * package's own. Each pin
+ *
+ * <pre>PIN &lt;name&gt; &lt;type&gt; &lt;xc&gt; &lt;yc&gt; &lt;fhs&gt; &lt;etype&gt; &lt;mtype&gt; [ID=&lt;id&gt;]</pre>
+ *
+ * <p>is followed by an outline of its own in the same forms — the pad. Outlines are kept as
+ * {@link ContourPolygon}s whatever form they were written in.
  *
  * <p>Coordinates are normalised to millimetres using the step's unit scale (ODB++
  * defaults to INCH). A {@code UNITS=} directive inside the eda/data file itself,
@@ -65,9 +69,10 @@ public class EdaDataParser {
         int netIndex = 0;
         int pkgIndex = 0;
 
-        // The package whose outline records we are still inside: set by PKG, cleared by the
-        // first PIN (whose own outline must not be mistaken for the body's) or the next record.
-        EdaData.PackageRecord outlineTarget = null;
+        // Where outline records currently belong: the package's own outline after a PKG line,
+        // the pin's after each PIN line, nowhere after a record that ends the package.
+        List<ContourPolygon> outlineTarget = null;
+        EdaData.PackageRecord currentPackage = null;
 
         for (int i = 0; i < rawLines.size(); i++) {
             String line = rawLines.get(i).trim();
@@ -85,6 +90,7 @@ public class EdaDataParser {
             }
             if (line.startsWith("NET ")) {
                 outlineTarget = null;
+                currentPackage = null;
                 EdaData.NetRecord net = new EdaData.NetRecord();
                 net.setName(field(line, 1));
                 net.setIndex(netIndex++);
@@ -94,21 +100,28 @@ public class EdaDataParser {
                 EdaData.PackageRecord pkg = parsePackage(line, scale, pkgIndex++);
                 edaData.getPackageRecords().add(pkg);
                 edaData.getPackageRecordsByName().put(pkg.getName(), pkg);
-                outlineTarget = pkg;
+                currentPackage = pkg;
+                outlineTarget = pkg.getOutline();
             } else if (line.startsWith("PIN ")) {
                 outlineTarget = null;
+                if (currentPackage != null) {
+                    EdaData.PinRecord pin = parsePin(line, scale, currentPackage.getPinRecords().size());
+                    currentPackage.getPinRecords().add(pin);
+                    currentPackage.getPinRecordsByName().putIfAbsent(pin.getName(), pin);
+                    outlineTarget = pin.getOutline();
+                }
             } else if (outlineTarget != null) {
                 if (line.startsWith("RC ")) {
                     ContourPolygon rc = rectangle(line, scale);
-                    if (rc != null) outlineTarget.getOutline().add(rc);
+                    if (rc != null) outlineTarget.add(rc);
                 } else if (line.startsWith("CR ")) {
                     ContourPolygon cr = circle(line, scale);
-                    if (cr != null) outlineTarget.getOutline().add(cr);
+                    if (cr != null) outlineTarget.add(cr);
                 } else if (line.startsWith("SQ ")) {
                     ContourPolygon sq = square(line, scale);
-                    if (sq != null) outlineTarget.getOutline().add(sq);
+                    if (sq != null) outlineTarget.add(sq);
                 } else if (line.equals("CT")) {
-                    i = parseContour(rawLines, i, scale, outlineTarget.getOutline());
+                    i = parseContour(rawLines, i, scale, outlineTarget);
                 }
             }
         }
@@ -138,6 +151,32 @@ public class EdaDataParser {
             }
         }
         return pkg;
+    }
+
+    /**
+     * Parse a {@code PIN} record. A short or garbled line still yields a named pin at the
+     * package origin, so the pin keeps its place in the list toeprints index into.
+     */
+    private static EdaData.PinRecord parsePin(String line, double scale, int index) {
+        String[] tok = line.split("\\s+");
+        EdaData.PinRecord pin = new EdaData.PinRecord();
+        pin.setIndex(index);
+        pin.setName(tok.length > 1 ? tok[1] : "");
+        if (tok.length > 2) pin.setType(tok[2]);
+        if (tok.length > 4) {
+            try {
+                pin.setXCenter(num(tok[3]) * scale);
+                pin.setYCenter(num(tok[4]) * scale);
+            } catch (NumberFormatException ignored) {
+                // Leave the centre at the package origin.
+            }
+        }
+        if (tok.length > 6) pin.setElectricalType(tok[6]);
+        if (tok.length > 7) {
+            int semi = tok[7].indexOf(';');
+            pin.setMountType(semi >= 0 ? tok[7].substring(0, semi) : tok[7]);
+        }
+        return pin;
     }
 
     /**

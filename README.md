@@ -63,7 +63,10 @@ All screenshots show the openly-available sample archives in [`examples/`](examp
   background colour, so layers stay correct when stacked
 - Frames are computed from what a layer actually draws — pad shapes, stroke
   widths and arc bulges — so nothing on the edge of the artwork is clipped
-- Component silhouette and centroid views
+- Component views per side: each package's body with its pads drawn on it, pin 1
+  marked by a coloured inlay in its pad and the reference designator fitted onto
+  the body; placed the way the component's toeprints say it sits
+- Assembly view: the realistic board with its components on it, as one SVG or PNG
 - PCB layer-stackup cross-section view
 - PNG rasterisation of any view through the Batik pipeline
 
@@ -95,8 +98,8 @@ All screenshots show the openly-available sample archives in [`examples/`](examp
   below), hover-to-isolate, pan and zoom on a millimetre grid
 - **Board Top / Board Bottom**: realistic renders with a live soldermask colour
   picker and a solder-paste / stencil overlay with adjustable opacity
-- **Components Top / Bottom**: package outlines and reference designators over
-  the board; hover or tap a component for its part, package and placement
+- **Components Top / Bottom**: package bodies, pads, a pin-1 marker and reference
+  designators over the board; hover or tap a component for its part, package and placement
 - **Stackup**: layer table with materials, Dk and thicknesses
 - **BOM**: searchable parts list with BOM and centroid CSV export
 - Downloads: Gerber X2 + Excellon zip, PNG of either side
@@ -136,6 +139,11 @@ MultiLayerSvgRenderer.forTopView().renderJob(job, Path.of("top.svg"));
 // Realistic top + bottom PNGs
 byte[] topPng = new MultiLayerSvgRenderer().renderRealisticSidePng(job, true, 1024);
 Files.write(Path.of("board-top.png"), topPng);
+
+// Assembly view: the realistic board with its components, top and bottom
+MultiLayerSvgRenderer renderer = new MultiLayerSvgRenderer();
+Files.writeString(Path.of("assembly-top.svg"), renderer.renderAssemblySvg(job, true));
+Files.write(Path.of("assembly-bottom.png"), renderer.renderAssemblySidePng(job, false, 2048));
 ```
 
 ### Convert to Gerber + Excellon

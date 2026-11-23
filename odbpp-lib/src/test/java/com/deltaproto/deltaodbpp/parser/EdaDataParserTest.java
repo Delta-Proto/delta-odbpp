@@ -295,4 +295,39 @@ class EdaDataParserTest {
 
         assertEquals("N\u00e9t", edaData.getNetRecords().get(0).getName());
     }
+
+    @Test
+    void testParsePins_withTheirOwnOutlines(@TempDir Path tempDir) throws IOException {
+        String content = """
+            UNITS=MM
+            PKG CHIP 3 -2 -1 2 1
+            RC -2 -1 4 2
+            PIN 1 S -1.5 0 0 U U ID=4
+            RC -2 -0.5 1 1
+            PIN 2 S 1.5 0 0 U U ID=5
+            CR 1.5 0 0.5
+            PKG NEXT 0 -1 -1 1 1
+            RC -1 -1 2 2
+            """;
+        Path dataFile = tempDir.resolve("data");
+        Files.writeString(dataFile, content);
+
+        EdaData edaData = parser.parse(dataFile, 25.4);
+
+        EdaData.PackageRecord chip = edaData.getPackageRecords().get(0);
+        assertEquals(1, chip.getOutline().size(), "pin outlines must not leak into the body's");
+        assertEquals(2, chip.getPinRecords().size());
+        EdaData.PinRecord pin1 = chip.getPinRecords().get(0);
+        assertEquals("1", pin1.getName());
+        assertEquals("S", pin1.getType());
+        assertEquals(0, pin1.getIndex());
+        assertEquals(-1.5, pin1.getXCenter(), 1e-9);
+        assertEquals(1, pin1.getOutline().size());
+        assertEquals(-2.0, pin1.getOutline().get(0).getXStart(), 1e-9);
+        EdaData.PinRecord pin2 = chip.getPinRecordsByName().get("2");
+        assertEquals(1, pin2.getIndex());
+        assertEquals(2, pin2.getOutline().get(0).getPolygonParts().size(), "circle = two arcs");
+        assertTrue(edaData.getPackageRecords().get(1).getPinRecords().isEmpty());
+        assertEquals(1, edaData.getPackageRecords().get(1).getOutline().size());
+    }
 }

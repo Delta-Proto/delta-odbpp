@@ -272,11 +272,12 @@
             font-size: 0.6875rem; color: #8492a6; pointer-events: none;
             font-variant-numeric: tabular-nums;
         }
-        /* Components drawn over the realistic board: translucent so the pads show through,
-           and lit up on hover together with the BOM hover card. */
-        .comp-overlay [data-outline] { fill-opacity: 0.45; transition: fill-opacity 0.1s; }
+        /* Components drawn over the realistic board: bodies a touch translucent so the board
+           still reads through them (their own pads are drawn on top, opaque), and solid on
+           hover together with the BOM hover card. */
+        .comp-overlay [data-outline] { fill-opacity: 0.8; transition: fill-opacity 0.1s; }
         .comp-overlay [data-refdes]:hover [data-outline],
-        .comp-overlay [data-refdes].comp-hover [data-outline] { fill-opacity: 0.85; }
+        .comp-overlay [data-refdes].comp-hover [data-outline] { fill-opacity: 1; }
         .comp-overlay [data-refdes] { cursor: pointer; }
         .comp-overlay text { pointer-events: none; }
         .comp-hovercard {

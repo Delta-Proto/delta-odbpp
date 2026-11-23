@@ -1063,14 +1063,25 @@ public class MultiLayerSvgRenderer {
     // Components view — silhouette of the board with package footprints
     // ------------------------------------------------------------------
 
-    // Colors used by the components view
+    // Colors used by the components view: grey bodies with lighter pads, the same on both
+    // sides, and one accent for the pin-1 inlay.
     private static final String COMP_BOARD_STROKE   = "#888888";
     private static final String COMP_BOARD_FILL     = "#1f1f1f";
-    private static final String COMP_TOP_FILL       = "#6aaed6";
-    private static final String COMP_TOP_STROKE     = "#2d79a3";
-    private static final String COMP_BOTTOM_FILL    = "#e89654";
-    private static final String COMP_BOTTOM_STROKE  = "#a9651f";
-    private static final String COMP_LABEL_COLOR    = "#ffffff";
+    private static final String COMP_BODY_FILL      = "#6b6b6b";
+    private static final String COMP_BODY_STROKE    = "#141414";
+    private static final String COMP_PIN_FILL       = "#929292";
+    private static final String COMP_PIN_STROKE     = "#555555";
+    private static final String COMP_PIN1_FILL      = "#e5392b";
+    private static final String COMP_LABEL_COLOR    = "#111111";
+
+    /** Margin between a pin-1 pad's edge and its inlay, as a fraction of the pad's short side. */
+    private static final double PIN1_INLAY_MARGIN = 0.20;
+    /**
+     * Largest diameter of the pin-1 inlay in mm — about the pad of a small chip passive. On
+     * bigger pads the inlay stops growing, so it marks the pin without turning a whole power
+     * pad into a block of colour.
+     */
+    private static final double PIN1_INLAY_MAX_MM = 0.45;
 
     /** Render only the components of a single side; convenience wrapper over Step/Matrix. */
     public void renderComponentsJob(Job job, boolean topSide, Writer writer) throws IOException {
@@ -1084,9 +1095,9 @@ public class MultiLayerSvgRenderer {
     }
 
     /**
-     * Render a top-down silhouette view of one side of the board: outline in
-     * gray, component packages as rotated rectangles (from their EDA bounding
-     * box), each labeled with its reference designator.
+     * Render a top-down view of one side of the board: outline in gray, each component as
+     * its EDA package body with the package's pads drawn on it, pin 1 marked by a coloured
+     * inlay inside its pad, and the reference designator fitted onto the body.
      *
      * <p>Complements {@link #renderRealisticStep(Step, Matrix, boolean, Writer)}
      * for the "Components" tab in the viewer.
@@ -1148,8 +1159,8 @@ public class MultiLayerSvgRenderer {
                 ? vbH * dpi
                 : (vbH / SvgRenderOptions.INCH_TO_MM) * dpi;
 
-        String fill = topSide ? COMP_TOP_FILL : COMP_BOTTOM_FILL;
-        String stroke = topSide ? COMP_TOP_STROKE : COMP_BOTTOM_STROKE;
+        String fill = COMP_BODY_FILL;
+        String stroke = COMP_BODY_STROKE;
 
         writer.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         writer.write(String.format(Locale.US,
@@ -1183,14 +1194,10 @@ public class MultiLayerSvgRenderer {
         // Components group
         writer.write("  <g data-stack-layer=\"components\">\n");
 
-        // Label font size, scaled relative to the viewBox — smaller boards get smaller labels.
-        double labelSize = Math.max(vbW, vbH) * 0.012;
-
         int packageFallbackCount = 0;
         for (Component c : components) {
             double cx = baseOptions.toOutputUnit(c.getX());
             double cy = baseOptions.toOutputUnit(c.getY());
-            boolean mirrored = c.getMirror() == MirrorType.MIRRORED;
 
             // Silhouette: the EDA package outline when the writer gave one, else the package
             // bounding box at its own offsets from the placement origin, else a default stub.
@@ -1198,14 +1205,18 @@ public class MultiLayerSvgRenderer {
             // cover the footprint's reference/value text, making parts look several times
             // their real size.
             String shape;
+            // The body's extent in the package frame (mm), for placing and sizing the label.
+            double[] body;
             EdaData.PackageRecord pkg = lookupPackage(packages, c.getPkgRef());
             if (pkg != null && pkg.hasOutline()) {
+                body = contourBounds(pkg.getOutline());
                 shape = String.format(Locale.US,
                         "<path d=\"%s\" fill=\"%s\" fill-rule=\"evenodd\" stroke=\"%s\" " +
                                 "stroke-width=\"0.5\" vector-effect=\"non-scaling-stroke\" " +
                                 "data-outline=\"contour\"/>",
                         contourPathData(pkg.getOutline()), fill, stroke);
             } else if (pkg != null && pkg.getWidth() > 0 && pkg.getHeight() > 0) {
+                body = new double[] {pkg.getXMin(), pkg.getYMin(), pkg.getXMax(), pkg.getYMax()};
                 double x0 = baseOptions.toOutputUnit(pkg.getXMin());
                 double y0 = baseOptions.toOutputUnit(pkg.getYMin());
                 double w = baseOptions.toOutputUnit(pkg.getWidth());
@@ -1219,6 +1230,8 @@ public class MultiLayerSvgRenderer {
                 double halfW = vbW * 0.01;
                 double halfH = vbH * 0.012;
                 packageFallbackCount++;
+                double mmPerUnit = 1.0 / baseOptions.toOutputUnit(1.0);
+                body = new double[] {-halfW * mmPerUnit, -halfH * mmPerUnit, halfW * mmPerUnit, halfH * mmPerUnit};
                 shape = String.format(Locale.US,
                         "<rect x=\"%.4f\" y=\"%.4f\" width=\"%.4f\" height=\"%.4f\" " +
                                 "fill=\"%s\" stroke=\"%s\" stroke-width=\"0.5\" " +
@@ -1226,10 +1239,13 @@ public class MultiLayerSvgRenderer {
                         -halfW, -halfH, 2 * halfW, 2 * halfH, fill, stroke);
             }
 
+            // ODB++ rotates clockwise and leaves the mirroring of bottom-side parts to the
+            // writer, so the placement is settled per component (see fitPlacement).
+            boolean flip = fitPlacement(c, pkg, topSide);
+            double angle = flip ? c.getRotation() : -c.getRotation();
             String compTransform = String.format(Locale.US,
                     "translate(%.4f %.4f) rotate(%.2f)%s",
-                    cx, cy, c.getRotation(),
-                    mirrored ? " scale(-1,1)" : "");
+                    cx, cy, angle, flip ? " scale(-1,1)" : "");
 
             writer.write(String.format(Locale.US,
                     "    <g transform=\"%s\" data-refdes=\"%s\" data-package-ref=\"%d\">\n",
@@ -1237,22 +1253,35 @@ public class MultiLayerSvgRenderer {
                     escapeAttr(c.getCompName() == null ? "" : c.getCompName()),
                     c.getPkgRef()));
             writer.write("      " + shape + "\n");
+            writePins(pkg, writer);
             writer.write("    </g>\n");
 
             // Refdes label — separate sibling group, outside the rotation/mirror transform so
-            // text stays upright. The label undoes the viewport's flip: Y only on the top side,
-            // X and Y on the bottom, whose viewport also mirrors X so the board reads as seen
-            // from behind. Either way the text lands on the component and reads left to right.
+            // text stays upright. It sits on the centre of the body and is sized to fit inside
+            // it. The label undoes the viewport's flip: Y only on the top side, X and Y on the
+            // bottom, whose viewport also mirrors X so the board reads as seen from behind.
             String refdes = c.getCompName();
             if (refdes != null && !refdes.isEmpty()) {
+                double rad = Math.toRadians(angle);
+                double cos = Math.cos(rad), sin = Math.sin(rad);
+                double bx = (body[0] + body[2]) / 2 * (flip ? -1 : 1);
+                double by = (body[1] + body[3]) / 2;
+                double tx = cx + baseOptions.toOutputUnit(bx * cos - by * sin);
+                double ty = cy + baseOptions.toOutputUnit(bx * sin + by * cos);
+                double bw = baseOptions.toOutputUnit(body[2] - body[0]);
+                double bh = baseOptions.toOutputUnit(body[3] - body[1]);
+                double boxW = Math.abs(bw * cos) + Math.abs(bh * sin);
+                double boxH = Math.abs(bw * sin) + Math.abs(bh * cos);
+                // A sans-serif glyph is about 0.6 em wide.
+                double labelSize = Math.min(0.8 * boxW / (0.6 * refdes.length()), 0.55 * boxH);
                 String unflip = topSide ? "scale(1,-1)" : "scale(-1,-1)";
-                double lx = topSide ? cx : -cx;
+                double lx = topSide ? tx : -tx;
                 writer.write(String.format(Locale.US,
                         "    <text x=\"%.4f\" y=\"%.4f\" font-size=\"%.4f\" fill=\"%s\" " +
                                 "text-anchor=\"middle\" font-family=\"sans-serif\" " +
                                 "transform=\"%s\" " +
                                 "data-refdes-label=\"%s\">%s</text>\n",
-                        lx, -cy, labelSize, COMP_LABEL_COLOR, unflip,
+                        lx, -ty + 0.35 * labelSize, labelSize, COMP_LABEL_COLOR, unflip,
                         escapeAttr(refdes), escapeAttr(refdes)));
             }
         }
@@ -1267,6 +1296,224 @@ public class MultiLayerSvgRenderer {
             writer.write("<!-- components-render: " + packageFallbackCount
                     + " component(s) used fallback outline -->\n");
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Assembly view — the realistic board with its components drawn on it
+    // ------------------------------------------------------------------
+
+    /** Opacity of component bodies in the assembly view, so the board still reads through. */
+    private static final double ASSEMBLY_BODY_OPACITY = 0.8;
+    /** Outline width of bodies and pads in the assembly view, in mm. */
+    private static final double ASSEMBLY_STROKE_MM = 0.03;
+
+    /**
+     * Render the assembly view of one side as a self-contained SVG: the realistic board
+     * ({@link #renderRealisticJob(Job, boolean, Writer)}) with that side's components
+     * ({@link #renderComponentsJob(Job, boolean, Writer)}) drawn on it — bodies, pads, the
+     * pin-1 inlay and reference designators.
+     *
+     * <p>Both views are framed on the step profile with the same padding, so the result has
+     * the realistic view's viewBox and the components land on their pads. Outlines get a real
+     * width instead of a non-scaling one, so the document rasterises the same everywhere. A
+     * job without a renderable board yields the components view alone; one without components
+     * on that side yields the realistic view alone.
+     *
+     * @param job     the ODB++ job
+     * @param topSide true for the top side, false for the bottom side (mirrored, as seen from below)
+     */
+    public void renderAssemblyJob(Job job, boolean topSide, Writer writer) throws IOException {
+        StringWriter boardWriter = new StringWriter();
+        renderRealisticJob(job, topSide, boardWriter);
+        String board = boardWriter.toString();
+        StringWriter componentsWriter = new StringWriter();
+        renderComponentsJob(job, topSide, componentsWriter);
+        String components = componentsWriter.toString();
+
+        boolean hasBoard = !board.isBlank() && !board.contains("<!-- Empty design -->");
+        if (!hasBoard) {
+            writer.write(components);
+            return;
+        }
+        String closing = "</g>\n</svg>";
+        String opening = "  <g data-stack-layer=\"components\">";
+        int from = components.indexOf(opening);
+        int to = components.lastIndexOf(closing);
+        int insertAt = board.lastIndexOf(closing);
+        if (from < 0 || to < from || insertAt < 0 || !components.contains("data-refdes=")) {
+            writer.write(board);
+            return;
+        }
+        String group = components.substring(from, to)
+                .replace("stroke-width=\"0.5\" vector-effect=\"non-scaling-stroke\"",
+                        String.format(Locale.US, "stroke-width=\"%.4f\"",
+                                baseOptions.toOutputUnit(ASSEMBLY_STROKE_MM)))
+                .replace(" data-outline=\"",
+                        String.format(Locale.US, " fill-opacity=\"%.2f\" data-outline=\"",
+                                ASSEMBLY_BODY_OPACITY));
+        writer.write(board, 0, insertAt);
+        writer.write(group);
+        writer.write(board, insertAt, board.length() - insertAt);
+    }
+
+    /** The assembly view of one side as an SVG string; see {@link #renderAssemblyJob}. */
+    public String renderAssemblySvg(Job job, boolean topSide) throws IOException {
+        StringWriter writer = new StringWriter();
+        renderAssemblyJob(job, topSide, writer);
+        return writer.toString();
+    }
+
+    /**
+     * Render the assembly view of one side ({@link #renderAssemblyJob}) and rasterise it to PNG.
+     *
+     * @param job      the ODB++ job
+     * @param topSide  true for the top side, false for the bottom side
+     * @param widthPx  target width in pixels; pass {@code 0} to derive from height
+     * @param heightPx target height in pixels; pass {@code 0} to derive from width
+     * @return PNG-encoded bytes
+     * @throws IllegalStateException if the job has neither a renderable board nor a profile
+     */
+    public byte[] renderAssemblySidePng(Job job, boolean topSide, int widthPx, int heightPx) throws IOException {
+        String svg = renderAssemblySvg(job, topSide);
+        if (svg.isBlank() || svg.contains("<!-- Empty design -->")) {
+            throw new IllegalStateException(
+                    "Cannot rasterise: assembly " + (topSide ? "top" : "bottom") +
+                            " view produced no content");
+        }
+        return rasterizeSvgToPng(svg, widthPx, heightPx);
+    }
+
+    /** Width-only convenience — height is derived from the SVG's aspect ratio. */
+    public byte[] renderAssemblySidePng(Job job, boolean topSide, int widthPx) throws IOException {
+        return renderAssemblySidePng(job, topSide, widthPx, 0);
+    }
+
+    /**
+     * Whether a component's package is drawn flipped (mirrored in X, then turned
+     * counter-clockwise) instead of plainly turned clockwise by its rotation.
+     *
+     * <p>Top-side parts are never flipped. For the bottom side writers disagree: some leave the
+     * package as designed and expect the reader to flip it (mirror flag {@code N}), others
+     * store the package already flipped (mirror flag {@code M}). The component's toeprints say
+     * where its pins really are, so when they tell the two readings apart they decide; the
+     * side and flag are only the fallback.
+     */
+    private static boolean fitPlacement(Component c, EdaData.PackageRecord pkg, boolean topSide) {
+        boolean byFlag = !topSide && c.getMirror() != MirrorType.MIRRORED;
+        if (pkg == null || pkg.getPinRecords() == null || c.getToeprintRecords() == null) {
+            return byFlag;
+        }
+        double rad = Math.toRadians(c.getRotation());
+        double cos = Math.cos(rad), sin = Math.sin(rad);
+        double errPlain = 0, errFlipped = 0;
+        for (ToeprintRecord top : c.getToeprintRecords()) {
+            int i = top.getPinNumber();
+            if (i < 0 || i >= pkg.getPinRecords().size()) continue;
+            EdaData.PinRecord pin = pkg.getPinRecords().get(i);
+            double px = pin.getXCenter(), py = pin.getYCenter();
+            double dx = top.getX() - c.getX(), dy = top.getY() - c.getY();
+            // Plain: clockwise by the rotation. Flipped: X mirrored, then counter-clockwise.
+            errPlain += sq(px * cos + py * sin - dx) + sq(-px * sin + py * cos - dy);
+            errFlipped += sq(-px * cos - py * sin - dx) + sq(-px * sin + py * cos - dy);
+        }
+        double tolerance = 1e-6;
+        if (Math.abs(errPlain - errFlipped) <= tolerance) return byFlag;
+        return errFlipped < errPlain;
+    }
+
+    private static double sq(double v) {
+        return v * v;
+    }
+
+    /**
+     * Write a package's pads into the open component group: every pin outline in one path, and
+     * on top of pin 1's pad an inlay — a circle on the centre of the pad's box, kept a margin of
+     * {@link #PIN1_INLAY_MARGIN} of the pad's short side away from its edge and no wider than
+     * {@link #PIN1_INLAY_MAX_MM} — that marks the pin while leaving the pad visible around it.
+     */
+    private void writePins(EdaData.PackageRecord pkg, Writer writer) throws IOException {
+        if (pkg == null || pkg.getPinRecords() == null || pkg.getPinRecords().isEmpty()) return;
+        List<ContourPolygon> pads = new ArrayList<>();
+        int drawn = 0;
+        for (EdaData.PinRecord pin : pkg.getPinRecords()) {
+            if (!pin.hasOutline()) continue;
+            pads.addAll(pin.getOutline());
+            drawn++;
+        }
+        if (pads.isEmpty()) return;
+        writer.write(String.format(Locale.US,
+                "      <path d=\"%s\" fill=\"%s\" fill-rule=\"evenodd\" stroke=\"%s\" " +
+                        "stroke-width=\"0.5\" vector-effect=\"non-scaling-stroke\" data-pins=\"%d\"/>\n",
+                contourPathData(pads), COMP_PIN_FILL, COMP_PIN_STROKE, drawn));
+
+        EdaData.PinRecord pin1 = pinOne(pkg);
+        if (pin1 == null || !pin1.hasOutline()) return;
+        double[] b = contourBounds(pin1.getOutline());
+        double w = b[2] - b[0], h = b[3] - b[1];
+        double shortSide = Math.min(w, h);
+        if (!(shortSide > 0)) return;
+        double diameter = Math.min(shortSide * (1 - 2 * PIN1_INLAY_MARGIN), PIN1_INLAY_MAX_MM);
+        writer.write(String.format(Locale.US,
+                "      <circle cx=\"%.4f\" cy=\"%.4f\" r=\"%.4f\" fill=\"%s\" data-pin1=\"%s\"/>\n",
+                baseOptions.toOutputUnit((b[0] + b[2]) / 2), baseOptions.toOutputUnit((b[1] + b[3]) / 2),
+                baseOptions.toOutputUnit(diameter / 2),
+                COMP_PIN1_FILL, escapeAttr(pin1.getName())));
+    }
+
+    /** Pin 1 of a package: the pin named {@code 1} or {@code A1}, else the first one listed. */
+    private static EdaData.PinRecord pinOne(EdaData.PackageRecord pkg) {
+        EdaData.PinRecord a1 = null;
+        for (EdaData.PinRecord pin : pkg.getPinRecords()) {
+            if ("1".equals(pin.getName())) return pin;
+            if (a1 == null && "A1".equalsIgnoreCase(pin.getName())) a1 = pin;
+        }
+        return a1 != null ? a1 : pkg.getPinRecords().get(0);
+    }
+
+    /**
+     * Extent {@code [xMin, yMin, xMax, yMax]} of a set of contour polygons in model
+     * coordinates (mm), arcs included by the part of the circle they actually sweep.
+     */
+    private static double[] contourBounds(List<ContourPolygon> polygons) {
+        double[] b = {Double.MAX_VALUE, Double.MAX_VALUE, -Double.MAX_VALUE, -Double.MAX_VALUE};
+        for (ContourPolygon polygon : polygons) {
+            double px = polygon.getXStart();
+            double py = polygon.getYStart();
+            grow(b, px, py);
+            for (ContourPolygon.PolygonPart part : polygon.getPolygonParts()) {
+                double ex = part.getEndX();
+                double ey = part.getEndY();
+                grow(b, ex, ey);
+                if (part.getType() == ContourPolygon.PolygonPart.Type.ARC) {
+                    double cx = part.getXCenter();
+                    double cy = part.getYCenter();
+                    double r = Math.hypot(ex - cx, ey - cy);
+                    double a0 = Math.atan2(py - cy, px - cx);
+                    double a1 = Math.atan2(ey - cy, ex - cx);
+                    // Counter-clockwise sweep from 'from' to 'to'; equal end points are a full circle.
+                    double from = part.isClockwise() ? a1 : a0;
+                    double to = part.isClockwise() ? a0 : a1;
+                    double sweep = ((to - from) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+                    if (px == ex && py == ey) sweep = 2 * Math.PI;
+                    for (int q = 0; q < 4; q++) {
+                        double axis = q * Math.PI / 2;
+                        double offset = ((axis - from) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+                        if (offset <= sweep) grow(b, cx + r * Math.cos(axis), cy + r * Math.sin(axis));
+                    }
+                }
+                px = ex;
+                py = ey;
+            }
+        }
+        if (b[0] > b[2]) return new double[] {0, 0, 0, 0};
+        return b;
+    }
+
+    private static void grow(double[] b, double x, double y) {
+        b[0] = Math.min(b[0], x);
+        b[1] = Math.min(b[1], y);
+        b[2] = Math.max(b[2], x);
+        b[3] = Math.max(b[3], y);
     }
 
     private static EdaData.PackageRecord lookupPackage(List<EdaData.PackageRecord> packages, int pkgRef) {
