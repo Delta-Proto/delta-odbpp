@@ -32,7 +32,7 @@ All screenshots show the openly-available sample archives in [`examples/`](examp
 <dependency>
     <groupId>com.deltaproto</groupId>
     <artifactId>delta-odbpp</artifactId>
-    <version>1.7.0</version>
+    <version>1.8.0</version>
 </dependency>
 ```
 
