@@ -66,7 +66,8 @@ All screenshots show the openly-available sample archives in [`examples/`](examp
 - Component views per side: each package's body with its pads drawn on it, pin 1
   marked by a coloured inlay in its pad and the reference designator fitted onto
   the body; placed the way the component's toeprints say it sits
-- Assembly view: the realistic board with its components on it, as one SVG or PNG
+- Assembly view: the realistic board with its components on it, as one SVG or PNG;
+  single packages in the same style through `PackageSvg`
 - PCB layer-stackup cross-section view
 - PNG rasterisation of any view through the Batik pipeline
 
@@ -144,6 +145,17 @@ Files.write(Path.of("board-top.png"), topPng);
 MultiLayerSvgRenderer renderer = new MultiLayerSvgRenderer();
 Files.writeString(Path.of("assembly-top.svg"), renderer.renderAssemblySvg(job, true));
 Files.write(Path.of("assembly-bottom.png"), renderer.renderAssemblySidePng(job, false, 2048));
+```
+
+To draw packages one at a time in the same style, `PackageSvg` gives a single
+package as a bare SVG fragment (millimetres, +y up) and the placement of a
+component:
+
+```java
+String body = PackageSvg.fragment(pkg, PackageSvg.Style.ASSEMBLY);
+PackageSvg.Placement p = PackageSvg.placement(component, pkg, /* topSide */ true);
+String svg = "<g transform=\"scale(1,-1)\"><g transform=\"" + p.svgTransform(component.getX(), component.getY())
+        + "\">" + body + "</g></g>";
 ```
 
 ### Convert to Gerber + Excellon
