@@ -67,6 +67,16 @@ public class Component {
     private String partName;
     
     /**
+     * Component height in mm from the {@code .comp_height} attribute, or {@code null} when the
+     * component does not carry it. The value is returned as written, so a writer's {@code 0}
+     * for "unknown" stays {@code 0}.
+     *
+     * <p>The attribute is a length in the components file's units: its own {@code UNITS} line,
+     * else the step's unit (INCH by the spec's default).
+     */
+    private Double heightMm;
+
+    /**
      * List of component attributes.
      * Comma-separated list of attribute assignments where:
      * - BOOLEAN: n (attribute n is set)
@@ -74,6 +84,11 @@ public class Component {
      * - INTEGER: n=i (attribute n has value i)
      * - FLOAT: n=f (attribute n has value f)
      * - TEXT: n=s (attribute n has the value associated with index s in the attribute text string lookup table)
+     *
+     * <p>The components file does not say which type an attribute has, so parsed attributes
+     * carry {@link AttributeType#BOOLEAN} when written bare and no type otherwise; the value is
+     * kept as written, in the file's units. {@link Components#getAttributeNames()} names the
+     * indices and {@link Components#getAttributeTexts()} resolves TEXT values.
      */
     private List<ComponentAttribute> attributes = new ArrayList<>();
     
